@@ -1,0 +1,16 @@
+create table media(
+    chat_id sqlite3_int64,
+    unique_id varchar(16) not null,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, unique_id)
+);
+
+create table urls(
+    chat_id sqlite3_int64,
+    unique_id varchar(250) not null,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, unique_id)
+);
+
+select * from media where timestamp <= date('now', '-7 day');
+select * from urls where timestamp <= date('now', '-7 day');
