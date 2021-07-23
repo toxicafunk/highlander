@@ -111,7 +111,7 @@ async fn run() {
         .await;
 }
 
-fn handle_message(chat: &Chat, connection: &Connection, mut acc: Status, file_unique_id: &str, table: &str) -> Status {
+fn handle_message(chat: &Chat, connection: &Connection, acc: Status, file_unique_id: &str, table: &str) -> Status {
     let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
     let insert = format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table);
     let mut select_stmt = ok!(connection.prepare(select));
@@ -127,11 +127,11 @@ fn handle_message(chat: &Chat, connection: &Connection, mut acc: Status, file_un
             ok!(insert_stmt.bind(2, file_unique_id));
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
-            acc.respond = true;
+            //acc.respond = true;
             acc
         },
         Some(_) => {
-            Status { action: true, respond: true, text: "This Media has been shared within the past 7 days".to_string() }
+            Status { action: true, respond: true, text: "Mensaje Duplicado: El archivo o url ya se ha compartido en los ultimos 5 dias.".to_string() }
         }
     }
 }
