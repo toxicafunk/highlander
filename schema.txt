@@ -12,5 +12,5 @@ create table urls(
     PRIMARY KEY (chat_id, unique_id)
 );
 
-select * from media where timestamp <= date('now', '-7 day');
-select * from urls where timestamp <= date('now', '-7 day');
+select * from media where timestamp <= date('now', '-4 day');
+select * from urls where timestamp <= date('now', '-4 day');

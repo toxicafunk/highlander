@@ -1,5 +1,5 @@
 use teloxide::prelude::*;
-use teloxide::types::{MessageKind, MediaKind, Chat};
+use teloxide::types::{MessageKind, MediaKind};
 use sqlite::Connection;
 
 use lazy_static::lazy_static;
@@ -34,9 +34,8 @@ async fn run() {
 
     teloxide::repl(bot, |message| async move {
         let update = &message.update;
-        log::info!("{:?}", update);
         let kind = update.kind.clone();
-        let chat = &update.chat;
+        let chat_id = update.chat.id;
 
         let success = "Media will be unique for 7 days";
         let  status = Status { action: false, respond: false, text: success.to_string() };
@@ -53,40 +52,44 @@ async fn run() {
                     lazy_static! {
                         static ref RE: Regex = Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?").unwrap();
                     }
-
                     let t = &*text.text;
-                    log::info!("Text Message: {}", t);
-
                     RE.captures_iter(t).fold(status, |acc, cap| {
                         let url = &cap[0];
-                        handle_message(chat, &connection, acc, extract_last250(url), "urls")
+                        log::info!("Detected url: {}", url);
+                        handle_message(chat_id, &connection, acc, extract_last250(url), "urls")
                     })
                 },
                 MediaKind::Animation(animation) => {
                     let file_unique_id = &*animation.animation.file_unique_id;
-                    handle_message(chat, &connection, status, file_unique_id, "media")
+                    log::info!("Animation: {:?}", update);
+                    handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Audio(audio) => {
                     let file_unique_id = &*audio.audio.file_unique_id;
-                    handle_message(chat, &connection, status, file_unique_id, "media")
+                    log::info!("Audio: {:?}", update);
+                    handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Document(document) => {
                     let file_unique_id = &*document.document.file_unique_id;
-                    handle_message(chat, &connection, status, file_unique_id, "media")
+                    log::info!("Document: {:?}", update);
+                    handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Photo(photo) => {
+                    log::info!("Photo: {:?}", update);
                     photo.photo.iter().fold(status,|acc, p| {
                         let file_unique_id = &*p.file_unique_id;
-                        handle_message(chat, &connection, acc, file_unique_id, "media")
+                        handle_message(chat_id, &connection, acc, file_unique_id, "media")
                     })
                 },
                 MediaKind::Video(video) => {
                     let file_unique_id = &*video.video.file_unique_id;
-                    handle_message(chat, &connection, status, file_unique_id, "media")
+                    log::info!("Video: {:?}", update);
+                    handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Voice(voice) => {
                     let file_unique_id = &*voice.voice.file_unique_id;
-                    handle_message(chat, &connection, status, file_unique_id, "media")
+                    log::info!("Voice: {:?}", update);
+                    handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 _ => {
                     log::info!("Other attachment");
@@ -111,11 +114,11 @@ async fn run() {
         .await;
 }
 
-fn handle_message(chat: &Chat, connection: &Connection, acc: Status, file_unique_id: &str, table: &str) -> Status {
+fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_unique_id: &str, table: &str) -> Status {
     let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
     let insert = format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table);
     let mut select_stmt = ok!(connection.prepare(select));
-    ok!(select_stmt.bind(1, chat.id));
+    ok!(select_stmt.bind(1, chat_id));
     ok!(select_stmt.bind(2, file_unique_id));
     let mut select_cursor = select_stmt.cursor();
     let row = ok!(select_cursor.next());
@@ -123,11 +126,11 @@ fn handle_message(chat: &Chat, connection: &Connection, acc: Status, file_unique
     match row {
         None => {
             let mut insert_stmt = ok!(connection.prepare(insert));
-            ok!(insert_stmt.bind(1, chat.id));
+            ok!(insert_stmt.bind(1, chat_id));
             ok!(insert_stmt.bind(2, file_unique_id));
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
-            //acc.respond = true;
+            log::info!("Stored {} - {}", chat_id, file_unique_id);
             acc
         },
         Some(_) => {
