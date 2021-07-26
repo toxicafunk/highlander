@@ -4,8 +4,12 @@ use sqlite::Connection;
 
 use lazy_static::lazy_static;
 use regex::Regex;
-
 use std::env;
+
+use std::io::Write;
+use chrono::Local;
+use pretty_env_logger::env_logger::Builder;
+use log::LevelFilter;
 
 macro_rules! ok(($result:expr) => ($result.unwrap()));
 
@@ -27,7 +31,18 @@ async fn main() {
 }
 
 async fn run() {
-    teloxide::enable_logging!();
+    //teloxide::enable_logging!();
+    Builder::new()
+        .format(|buf, record| {
+            writeln!(buf,
+                     "{} [{}] - {}",
+                     Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                     record.level(),
+                     record.args()
+            )
+        })
+        .filter(None, LevelFilter::Info)
+        .init();
     log::info!("Starting Highlander bot...");
 
     let bot = Bot::from_env().auto_send();
@@ -38,7 +53,7 @@ async fn run() {
         let chat_id = update.chat.id;
 
         let success = "Media will be unique for 7 days";
-        let  status = Status { action: false, respond: false, text: success.to_string() };
+        let mut status = Status { action: false, respond: false, text: success.to_string() };
 
         let db_path =  match env::var("HIGHLANDER_DB_PATH") {
             Ok(path) => path,
@@ -62,20 +77,28 @@ async fn run() {
                 MediaKind::Animation(animation) => {
                     let file_unique_id = &*animation.animation.file_unique_id;
                     log::info!("Animation: {:?}", update);
+                    let caption = &*animation.caption.unwrap_or(update.id.to_string());
+                    status.text = caption.into();
                     handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Audio(audio) => {
                     let file_unique_id = &*audio.audio.file_unique_id;
                     log::info!("Audio: {:?}", update);
+                    let caption = &*audio.caption.unwrap_or(update.id.to_string());
+                    status.text = caption.into();
                     handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Document(document) => {
                     let file_unique_id = &*document.document.file_unique_id;
                     log::info!("Document: {:?}", update);
+                    let caption = &*document.caption.unwrap_or(update.id.to_string());
+                    status.text = caption.into();
                     handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Photo(photo) => {
                     log::info!("Photo: {:?}", update);
+                    let caption = &*photo.caption.unwrap_or(update.id.to_string());
+                    status.text = caption.into();
                     photo.photo.iter().fold(status,|acc, p| {
                         let file_unique_id = &*p.file_unique_id;
                         handle_message(chat_id, &connection, acc, file_unique_id, "media")
@@ -83,12 +106,16 @@ async fn run() {
                 },
                 MediaKind::Video(video) => {
                     let file_unique_id = &*video.video.file_unique_id;
+                    let caption = &*video.caption.unwrap_or(update.id.to_string());
                     log::info!("Video: {:?}", update);
+                    status.text = caption.into();
                     handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 MediaKind::Voice(voice) => {
                     let file_unique_id = &*voice.voice.file_unique_id;
                     log::info!("Voice: {:?}", update);
+                    let caption = &*voice.caption.unwrap_or(update.id.to_string());
+                    status.text = caption.into();
                     handle_message(chat_id, &connection, status, file_unique_id, "media")
                 },
                 _ => {
@@ -130,10 +157,11 @@ fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_uniqu
             ok!(insert_stmt.bind(2, file_unique_id));
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
-            log::info!("Stored {} - {}", chat_id, file_unique_id);
+            log::info!("Stored {} - {} - {}", chat_id, file_unique_id, acc.text);
             acc
         },
         Some(_) => {
+            log::info!("Duplicate: {} - {} - {}", chat_id, file_unique_id, acc.text);
             Status { action: true, respond: true, text: "Mensaje Duplicado: El archivo o url ya se ha compartido en los ultimos 5 dias.".to_string() }
         }
     }
