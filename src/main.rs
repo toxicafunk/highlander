@@ -11,6 +11,11 @@ use chrono::Local;
 use pretty_env_logger::env_logger::Builder;
 use log::LevelFilter;
 
+use teloxide::utils::command::BotCommand;
+
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use teloxide::RequestError;
+
 macro_rules! ok(($result:expr) => ($result.unwrap()));
 
 struct Status {
@@ -23,6 +28,29 @@ fn extract_last250(text: &str) -> &str {
     let l = text.len();
     let i = if l > 250 { l - 250} else { 0 };
     text.get(i..l).unwrap_or("")
+}
+
+#[derive(BotCommand)]
+#[command(rename = "lowercase", description = "These commands are supported:")]
+enum Command {
+    #[command(description = "display this text.")]
+    Help,
+    #[command(description = "handle a username.")]
+    Username(String),
+    #[command(description = "handle a username and an age.", parse_with = "split")]
+    UsernameAndAge { username: String, age: u8 },
+}
+
+async fn handle_command(
+    cx: UpdateWithCx<AutoSend<Bot>, Message>,
+    command: Command,
+) -> Result<Message, RequestError> {
+    match command {
+        Command::Help => cx.answer(Command::descriptions()).await,
+        Command::Username(username) => cx.answer(format!("Your username is @{}.", username)).await,
+        Command::UsernameAndAge { username, age } =>
+            cx.answer(format!("Your username is @{} and age is {}.", username, age)).await
+    }
 }
 
 #[tokio::main]
@@ -47,98 +75,129 @@ async fn run() {
 
     let bot = Bot::from_env().auto_send();
 
-    teloxide::repl(bot, |message| async move {
-        let update = &message.update;
-        let kind = update.kind.clone();
-        let chat_id = update.chat.id;
+    Dispatcher::new(bot)
+        .messages_handler(|rx: DispatcherHandlerRx<AutoSend<Bot>, Message>| {
+            UnboundedReceiverStream::new(rx).for_each_concurrent(
+                None,
+                |message| async move {
+                    let r = detect_duplicates(&message);
+                    if r.respond {
+                        let mr = message.answer(r.text).await;
+                        match mr {
+                            Ok(m) => log::info!("Responded: {:?}", m),
+                            Err(e) => log::error!("Error: {:?}", e)
+                        }
+                    }
+                    if r.action {
+                        let mr = message.delete_message().await;
+                        match mr {
+                            Ok(m) => log::info!("Deleted message: {:?}", m),
+                            Err(e) => log::error!("Error: {:?}", e)
+                        }
+                    }
 
-        let success = "Media will be unique for 7 days";
-        let mut status = Status { action: false, respond: false, text: success.to_string() };
+                    let txt = message.update.text().unwrap();
+                    let bot_name = "ramirez";
 
-        let db_path =  match env::var("HIGHLANDER_DB_PATH") {
-            Ok(path) => path,
-            Err(_) => String::from("."),
-        };
-        let connection: Connection = sqlite::open(format!("{}/attachments.db", db_path)).unwrap();
+                    match Command::parse(txt, bot_name) {
+                        Ok(command) => {
+                            let cr = handle_command(message, command).await;
+                            match cr {
+                                Ok(msg) => log::info!("Respond: {:?}", msg),
+                                Err(e) => log::error!("Error: {:?}", e)
+                            }
+                        }
+                        Err(_) => ()// message.answer("No command").await
+                    };
+                }
+            )
+        })
+        .dispatch()
+        .await;
+}
 
-        let r: Status = match kind {
-            MessageKind::Common(msg_common) => match msg_common.media_kind {
-                MediaKind::Text(text) => {
-                    lazy_static! {
+fn detect_duplicates(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Status {
+    let update = &message.update;
+    let kind = update.kind.clone();
+    let chat_id = update.chat.id;
+
+    let success = "Media will be unique for 5 days";
+    let mut status = Status { action: false, respond: false, text: success.to_string() };
+
+    let db_path = match env::var("HIGHLANDER_DB_PATH") {
+        Ok(path) => path,
+        Err(_) => String::from("."),
+    };
+    let connection: Connection = sqlite::open(format!("{}/attachments.db", db_path)).unwrap();
+
+    let r: Status = match kind {
+        MessageKind::Common(msg_common) => match msg_common.media_kind {
+            MediaKind::Text(text) => {
+                lazy_static! {
                         static ref RE: Regex = Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?").unwrap();
                     }
-                    let t = &*text.text;
-                    RE.captures_iter(t).fold(status, |acc, cap| {
-                        let url = &cap[0];
-                        log::info!("Detected url: {}", url);
-                        handle_message(chat_id, &connection, acc, extract_last250(url), "urls")
-                    })
-                },
-                MediaKind::Animation(animation) => {
-                    let file_unique_id = &*animation.animation.file_unique_id;
-                    log::info!("Animation: {:?}", update);
-                    let caption = &*animation.caption.unwrap_or(update.id.to_string());
-                    status.text = caption.into();
-                    handle_message(chat_id, &connection, status, file_unique_id, "media")
-                },
-                MediaKind::Audio(audio) => {
-                    let file_unique_id = &*audio.audio.file_unique_id;
-                    log::info!("Audio: {:?}", update);
-                    let caption = &*audio.caption.unwrap_or(update.id.to_string());
-                    status.text = caption.into();
-                    handle_message(chat_id, &connection, status, file_unique_id, "media")
-                },
-                MediaKind::Document(document) => {
-                    let file_unique_id = &*document.document.file_unique_id;
-                    log::info!("Document: {:?}", update);
-                    let caption = &*document.caption.unwrap_or(update.id.to_string());
-                    status.text = caption.into();
-                    handle_message(chat_id, &connection, status, file_unique_id, "media")
-                },
-                MediaKind::Photo(photo) => {
-                    log::info!("Photo: {:?}", update);
-                    let caption = &*photo.caption.unwrap_or(update.id.to_string());
-                    status.text = caption.into();
-                    photo.photo.iter().fold(status,|acc, p| {
-                        let file_unique_id = &*p.file_unique_id;
-                        handle_message(chat_id, &connection, acc, file_unique_id, "media")
-                    })
-                },
-                MediaKind::Video(video) => {
-                    let file_unique_id = &*video.video.file_unique_id;
-                    let caption = &*video.caption.unwrap_or(update.id.to_string());
-                    log::info!("Video: {:?}", update);
-                    status.text = caption.into();
-                    handle_message(chat_id, &connection, status, file_unique_id, "media")
-                },
-                MediaKind::Voice(voice) => {
-                    let file_unique_id = &*voice.voice.file_unique_id;
-                    log::info!("Voice: {:?}", update);
-                    let caption = &*voice.caption.unwrap_or(update.id.to_string());
-                    status.text = caption.into();
-                    handle_message(chat_id, &connection, status, file_unique_id, "media")
-                },
-                _ => {
-                    log::info!("Other attachment");
-                    status
-                }
+                let t = &*text.text;
+                RE.captures_iter(t).fold(status, |acc, cap| {
+                    let url = &cap[0];
+                    log::info!("Detected url: {}", url);
+                    handle_message(chat_id, &connection, acc, extract_last250(url), "urls")
+                })
+            },
+            MediaKind::Animation(animation) => {
+                let file_unique_id = &*animation.animation.file_unique_id;
+                log::info!("Animation: {:?}", update);
+                let caption = &*animation.caption.unwrap_or(update.id.to_string());
+                status.text = caption.into();
+                handle_message(chat_id, &connection, status, file_unique_id, "media")
+            },
+            MediaKind::Audio(audio) => {
+                let file_unique_id = &*audio.audio.file_unique_id;
+                log::info!("Audio: {:?}", update);
+                let caption = &*audio.caption.unwrap_or(update.id.to_string());
+                status.text = caption.into();
+                handle_message(chat_id, &connection, status, file_unique_id, "media")
+            },
+            MediaKind::Document(document) => {
+                let file_unique_id = &*document.document.file_unique_id;
+                log::info!("Document: {:?}", update);
+                let caption = &*document.caption.unwrap_or(update.id.to_string());
+                status.text = caption.into();
+                handle_message(chat_id, &connection, status, file_unique_id, "media")
+            },
+            MediaKind::Photo(photo) => {
+                log::info!("Photo: {:?}", update);
+                let caption = &*photo.caption.unwrap_or(update.id.to_string());
+                status.text = caption.into();
+                photo.photo.iter().fold(status, |acc, p| {
+                    let file_unique_id = &*p.file_unique_id;
+                    handle_message(chat_id, &connection, acc, file_unique_id, "media")
+                })
+            },
+            MediaKind::Video(video) => {
+                let file_unique_id = &*video.video.file_unique_id;
+                let caption = &*video.caption.unwrap_or(update.id.to_string());
+                log::info!("Video: {:?}", update);
+                status.text = caption.into();
+                handle_message(chat_id, &connection, status, file_unique_id, "media")
+            },
+            MediaKind::Voice(voice) => {
+                let file_unique_id = &*voice.voice.file_unique_id;
+                log::info!("Voice: {:?}", update);
+                let caption = &*voice.caption.unwrap_or(update.id.to_string());
+                status.text = caption.into();
+                handle_message(chat_id, &connection, status, file_unique_id, "media")
             },
             _ => {
-                log::info!("Not interesting");
+                log::info!("Other attachment");
                 status
             }
-        };
-
-        if r.respond {
-            message.answer(r.text).await?;
+        },
+        _ => {
+            log::info!("Not interesting");
+            status
         }
-
-        if r.action {
-            message.delete_message().await?;
-        }
-        respond(())
-    })
-        .await;
+    };
+    r
 }
 
 fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_unique_id: &str, table: &str) -> Status {
