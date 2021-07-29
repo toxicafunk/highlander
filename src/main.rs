@@ -36,23 +36,10 @@ enum Command {
     #[command(description = "display this text.")]
     Help,
     #[command(description = "handle a username.")]
-    Username(String),
+    LastStored(u8),
     #[command(description = "handle a username and an age.", parse_with = "split")]
     UsernameAndAge { username: String, age: u8 },
 }
-
-async fn handle_command(
-    cx: UpdateWithCx<AutoSend<Bot>, Message>,
-    command: Command,
-) -> Result<Message, RequestError> {
-    match command {
-        Command::Help => cx.answer(Command::descriptions()).await,
-        Command::Username(username) => cx.answer(format!("Your username is @{}.", username)).await,
-        Command::UsernameAndAge { username, age } =>
-            cx.answer(format!("Your username is @{} and age is {}.", username, age)).await
-    }
-}
-
 #[tokio::main]
 async fn main() {
     run().await;
@@ -80,7 +67,12 @@ async fn run() {
             UnboundedReceiverStream::new(rx).for_each_concurrent(
                 None,
                 |message| async move {
-                    let r = detect_duplicates(&message);
+                    let db_path = match env::var("HIGHLANDER_DB_PATH") {
+                        Ok(path) => path,
+                        Err(_) => String::from("."),
+                    };
+                    let connection: Connection = sqlite::open(format!("{}/attachments.db", db_path)).unwrap();
+                    let r = detect_duplicates(&connection, &message);
                     if r.respond {
                         let mr = message.answer(r.text).await;
                         match mr {
@@ -96,19 +88,25 @@ async fn run() {
                         }
                     }
 
-                    let txt = message.update.text().unwrap();
+                    let txt_opt = message.update.text();
                     let bot_name = "ramirez";
 
-                    match Command::parse(txt, bot_name) {
-                        Ok(command) => {
-                            let cr = handle_command(message, command).await;
-                            match cr {
-                                Ok(msg) => log::info!("Respond: {:?}", msg),
-                                Err(e) => log::error!("Error: {:?}", e)
+                    match txt_opt {
+                        Some(txt) => match Command::parse(txt, bot_name) {
+                            Ok(command) => {
+                                let cr = handle_command(&connection, command);
+                                match cr {
+                                    Ok(msg) => {
+                                        log::info!("Response: {}", &msg);
+                                        ok!(message.answer(msg).await);
+                                    },
+                                    Err(e) => log::error!("Error: {:?}", e)
+                                }
                             }
-                        }
-                        Err(_) => ()// message.answer("No command").await
-                    };
+                            Err(_) => ()
+                        },
+                        None => ()
+                    }
                 }
             )
         })
@@ -116,19 +114,13 @@ async fn run() {
         .await;
 }
 
-fn detect_duplicates(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Status {
+fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Status {
     let update = &message.update;
     let kind = update.kind.clone();
     let chat_id = update.chat.id;
 
     let success = "Media will be unique for 5 days";
     let mut status = Status { action: false, respond: false, text: success.to_string() };
-
-    let db_path = match env::var("HIGHLANDER_DB_PATH") {
-        Ok(path) => path,
-        Err(_) => String::from("."),
-    };
-    let connection: Connection = sqlite::open(format!("{}/attachments.db", db_path)).unwrap();
 
     let r: Status = match kind {
         MessageKind::Common(msg_common) => match msg_common.media_kind {
@@ -224,6 +216,27 @@ fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_uniqu
             Status { action: true, respond: true, text: "Mensaje Duplicado: El archivo o url ya se ha compartido en los ultimos 5 dias.".to_string() }
         }
     }
+}
+
+fn handle_command(
+    connection: &Connection,
+    command: Command,
+) -> Result<String, RequestError> {
+    let r = match command {
+        Command::Help => Command::descriptions(),
+        Command::LastStored(num) => {
+            let select = format!("SELECT * FROM media ORDER BY timestamp DESC limit {};", num);
+            let mut vec = Vec::new();
+            ok!(connection.iterate(select, |media| {
+                vec.push(format!("{:?}", media));
+                true
+            }));
+            format!("{:?}.", vec.join("\n"))
+        }
+        Command::UsernameAndAge { username, age } =>
+            format!("Your username is @{} and age is {}.", username, age)
+    };
+    Ok(r)
 }
 
 #[cfg(test)]
