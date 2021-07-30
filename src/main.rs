@@ -1,5 +1,5 @@
 use teloxide::prelude::*;
-use teloxide::types::{MessageKind, MediaKind};
+use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
 use sqlite::Connection;
 
 use lazy_static::lazy_static;
@@ -21,7 +21,21 @@ macro_rules! ok(($result:expr) => ($result.unwrap()));
 struct Status {
     action: bool,
     respond: bool,
-    text: String,
+    text: String
+}
+
+#[derive(Debug)]
+struct SDO {
+    chat_id: i64,
+    msg_id: i32,
+    file_type: String,
+    unique_id: String,
+    file_id: Option<String>
+}
+
+enum HResponse {
+    Media(Vec<InputMedia>),
+    URL(Vec<String>)
 }
 
 fn extract_last250(text: &str) -> &str {
@@ -35,8 +49,8 @@ fn extract_last250(text: &str) -> &str {
 enum Command {
     #[command(description = "display this text.")]
     Help,
-    #[command(description = "handle a username.")]
-    LastStored(u8),
+    #[command(description = "retrieves the las n media")]
+    LastMediaStored(u8),
     #[command(description = "handle a username and an age.", parse_with = "split")]
     UsernameAndAge { username: String, age: u8 },
 }
@@ -46,7 +60,6 @@ async fn main() {
 }
 
 async fn run() {
-    //teloxide::enable_logging!();
     Builder::new()
         .format(|buf, record| {
             writeln!(buf,
@@ -71,7 +84,7 @@ async fn run() {
                         Ok(path) => path,
                         Err(_) => String::from("."),
                     };
-                    let connection: Connection = sqlite::open(format!("{}/attachments.db", db_path)).unwrap();
+                    let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
                     let r = detect_duplicates(&connection, &message);
                     if r.respond {
                         let mr = message.answer(r.text).await;
@@ -96,9 +109,15 @@ async fn run() {
                             Ok(command) => {
                                 let cr = handle_command(&connection, command);
                                 match cr {
-                                    Ok(msg) => {
-                                        log::info!("Response: {}", &msg);
-                                        ok!(message.answer(msg).await);
+                                    Ok(hr) => match hr {
+                                        HResponse::URL(urls) => {
+                                            let ans = urls.join("\n");
+                                            ok!(message.answer(ans).await);
+                                        },
+                                        HResponse::Media(vec) => {
+                                            log::info!("Response size: {}", vec.len());
+                                            ok!(message.answer_media_group(vec).await);
+                                        }
                                     },
                                     Err(e) => log::error!("Error: {:?}", e)
                                 }
@@ -118,6 +137,7 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
     let update = &message.update;
     let kind = update.kind.clone();
     let chat_id = update.chat.id;
+    let msg_id = update.id;
 
     let success = "Media will be unique for 5 days";
     let mut status = Status { action: false, respond: false, text: success.to_string() };
@@ -126,35 +146,42 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
         MessageKind::Common(msg_common) => match msg_common.media_kind {
             MediaKind::Text(text) => {
                 lazy_static! {
-                        static ref RE: Regex = Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?").unwrap();
+                        static ref RE: Regex = ok!(Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?"));
                     }
                 let t = &*text.text;
                 RE.captures_iter(t).fold(status, |acc, cap| {
                     let url = &cap[0];
                     log::info!("Detected url: {}", url);
-                    handle_message(chat_id, &connection, acc, extract_last250(url), "urls")
+                    let sdo = SDO { chat_id, msg_id, file_type: String::from("url"), unique_id: extract_last250(url).into(), file_id: None };
+                    handle_message(&connection, acc, sdo, "urls")
                 })
             },
             MediaKind::Animation(animation) => {
-                let file_unique_id = &*animation.animation.file_unique_id;
+                let file_unique_id = animation.animation.file_unique_id;
+                let file_id = animation.animation.file_id;
                 log::info!("Animation: {:?}", update);
                 let caption = &*animation.caption.unwrap_or(update.id.to_string());
                 status.text = caption.into();
-                handle_message(chat_id, &connection, status, file_unique_id, "media")
+                let sdo = SDO { chat_id, msg_id, file_type: String::from("animation"), unique_id: file_unique_id, file_id: Some(file_id) };
+                handle_message(&connection, status, sdo, "media")
             },
             MediaKind::Audio(audio) => {
-                let file_unique_id = &*audio.audio.file_unique_id;
+                let file_unique_id = audio.audio.file_unique_id;
+                let file_id = audio.audio.file_id;
                 log::info!("Audio: {:?}", update);
                 let caption = &*audio.caption.unwrap_or(update.id.to_string());
                 status.text = caption.into();
-                handle_message(chat_id, &connection, status, file_unique_id, "media")
+                let sdo = SDO { chat_id, msg_id, file_type: String::from("audio"), unique_id: file_unique_id, file_id: Some(file_id) };
+                handle_message(&connection, status, sdo, "media")
             },
             MediaKind::Document(document) => {
-                let file_unique_id = &*document.document.file_unique_id;
+                let file_unique_id = document.document.file_unique_id;
+                let file_id = document.document.file_id;
                 log::info!("Document: {:?}", update);
                 let caption = &*document.caption.unwrap_or(update.id.to_string());
                 status.text = caption.into();
-                handle_message(chat_id, &connection, status, file_unique_id, "media")
+                let sdo = SDO { chat_id, msg_id, file_type: String::from("document"), unique_id: file_unique_id, file_id: Some(file_id) };
+                handle_message(&connection, status, sdo, "media")
             },
             MediaKind::Photo(photo) => {
                 log::info!("Photo: {:?}", update);
@@ -162,22 +189,28 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
                 status.text = caption.into();
                 photo.photo.iter().fold(status, |acc, p| {
                     let file_unique_id = &*p.file_unique_id;
-                    handle_message(chat_id, &connection, acc, file_unique_id, "media")
+                    let file_id = &*p.file_id;
+                    let sdo = SDO { chat_id, msg_id, file_type: String::from("photo"), unique_id: file_unique_id.into(), file_id: Some(file_id.into()) };
+                    handle_message(&connection, acc, sdo, "media")
                 })
             },
             MediaKind::Video(video) => {
-                let file_unique_id = &*video.video.file_unique_id;
+                let file_unique_id = video.video.file_unique_id;
+                let file_id = video.video.file_id;
                 let caption = &*video.caption.unwrap_or(update.id.to_string());
                 log::info!("Video: {:?}", update);
                 status.text = caption.into();
-                handle_message(chat_id, &connection, status, file_unique_id, "media")
+                let sdo = SDO { chat_id, msg_id, file_type: String::from("video"), unique_id: file_unique_id, file_id: Some(file_id) };
+                handle_message(&connection, status, sdo, "media")
             },
             MediaKind::Voice(voice) => {
-                let file_unique_id = &*voice.voice.file_unique_id;
+                let file_unique_id = voice.voice.file_unique_id;
+                let file_id = voice.voice.file_id;
                 log::info!("Voice: {:?}", update);
                 let caption = &*voice.caption.unwrap_or(update.id.to_string());
                 status.text = caption.into();
-                handle_message(chat_id, &connection, status, file_unique_id, "media")
+                let sdo = SDO { chat_id, msg_id, file_type: String::from("voice"), unique_id: file_unique_id, file_id: Some(file_id) };
+                handle_message(&connection, status, sdo, "media")
             },
             _ => {
                 log::info!("Other attachment");
@@ -192,27 +225,31 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
     r
 }
 
-fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_unique_id: &str, table: &str) -> Status {
+fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -> Status {
     let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
-    let insert = format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table);
+    let insert = format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table);
     let mut select_stmt = ok!(connection.prepare(select));
-    ok!(select_stmt.bind(1, chat_id));
-    ok!(select_stmt.bind(2, file_unique_id));
+    ok!(select_stmt.bind(1, sdo.chat_id));
+    ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
     let mut select_cursor = select_stmt.cursor();
     let row = ok!(select_cursor.next());
 
+    log::info!("SDO: {:?}", sdo);
     match row {
         None => {
             let mut insert_stmt = ok!(connection.prepare(insert));
-            ok!(insert_stmt.bind(1, chat_id));
-            ok!(insert_stmt.bind(2, file_unique_id));
+            ok!(insert_stmt.bind(1, sdo.chat_id));
+            ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
+            ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
+            ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
+            ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
-            log::info!("Stored {} - {} - {}", chat_id, file_unique_id, acc.text);
+            log::info!("Stored {} - {} - {} - {}", sdo.chat_id, sdo.msg_id, sdo.unique_id, acc.text);
             acc
         },
         Some(_) => {
-            log::info!("Duplicate: {} - {} - {}", chat_id, file_unique_id, acc.text);
+            log::info!("Duplicate: {} - {} - {}", sdo.chat_id, sdo.unique_id, acc.text);
             Status { action: true, respond: true, text: "Mensaje Duplicado: El archivo o url ya se ha compartido en los ultimos 5 dias.".to_string() }
         }
     }
@@ -221,20 +258,32 @@ fn handle_message(chat_id: i64, connection: &Connection, acc: Status, file_uniqu
 fn handle_command(
     connection: &Connection,
     command: Command,
-) -> Result<String, RequestError> {
+) -> Result<HResponse, RequestError> {
     let r = match command {
-        Command::Help => Command::descriptions(),
-        Command::LastStored(num) => {
+        Command::Help => HResponse::URL(vec![Command::descriptions()]),
+        Command::LastMediaStored(num) => {
             let select = format!("SELECT * FROM media ORDER BY timestamp DESC limit {};", num);
             let mut vec = Vec::new();
-            ok!(connection.iterate(select, |media| {
-                vec.push(format!("{:?}", media));
+            ok!(connection.iterate(select, |dbmedia| {
+                let (_, file_type) = dbmedia[3];
+                let (_, unique_id) = dbmedia[4];
+                let (_, file_id) = dbmedia[5];
+                let ftype = ok!(file_type);
+                let im: InputMedia = match ftype {
+                    "photo" => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
+                    "video" => InputMedia::Video(InputMediaVideo { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, width: None, height: None, duration: None, supports_streaming: None }),
+                    "audio" => InputMedia::Audio(InputMediaAudio { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, performer: None, title: None, duration: None }),
+                    "animation" => InputMedia::Animation(InputMediaAnimation { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, width: None, height: None, duration: None, thumb: None }),
+                    "document" => InputMedia::Document(InputMediaDocument { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, disable_content_type_detection: None }),
+                    _ => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
+                };
+                vec.push(im);
                 true
             }));
-            format!("{:?}.", vec.join("\n"))
+            HResponse::Media(vec)
         }
         Command::UsernameAndAge { username, age } =>
-            format!("Your username is @{} and age is {}.", username, age)
+            HResponse::URL(vec![format!("Your username is @{} and age is {}.", username, age)])
     };
     Ok(r)
 }
@@ -250,7 +299,7 @@ mod tests {
         let t2 = "hola https://twitter.com/plaforscience/status/1379526168513277960 y ademas https://youtu.be/GCI0NMgVfPk";
         let t3 = "https://drive.google.com/file/d/1t3_HeKZDIMEJl5_Y_l7uuIt4IeebCN7e/view?usp=sharing";
 
-        let re: Regex = Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?").unwrap();
+        let re: Regex = ok!(Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?"));
 
         let caps = re.captures_iter(t1);
         //println!("Found: {}", caps.count());

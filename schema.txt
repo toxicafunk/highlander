@@ -1,6 +1,9 @@
 create table media(
     chat_id sqlite3_int64,
+    msg_id sqlite3_int32,
+    file_type varchar(9) not null,
     unique_id varchar(16) not null,
+    file_id varchar(90) null,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (chat_id, unique_id)
 );
