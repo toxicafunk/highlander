@@ -107,7 +107,7 @@ async fn run() {
                     match txt_opt {
                         Some(txt) => match Command::parse(txt, bot_name) {
                             Ok(command) => {
-                                let cr = handle_command(&connection, command);
+                                let cr = handle_command(&connection, command, message.update.chat_id());
                                 match cr {
                                     Ok(hr) => match hr {
                                         HResponse::URL(urls) => {
@@ -115,7 +115,7 @@ async fn run() {
                                             ok!(message.answer(ans).await);
                                         },
                                         HResponse::Media(vec) => {
-                                            log::info!("Response size: {}", vec.len());
+                                            log::info!("Response size: {}\n{:?}", vec.len(), vec);
                                             ok!(message.answer_media_group(vec).await);
                                         }
                                     },
@@ -258,16 +258,17 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
 fn handle_command(
     connection: &Connection,
     command: Command,
+    chat_id: i64,
 ) -> Result<HResponse, RequestError> {
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
         Command::LastMediaStored(num) => {
-            let select = format!("SELECT * FROM media ORDER BY timestamp DESC limit {};", num);
+            let select = format!("SELECT * FROM media  WHERE chat_id = {} GROUP BY msg_id ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
-                let (_, file_type) = dbmedia[3];
-                let (_, unique_id) = dbmedia[4];
-                let (_, file_id) = dbmedia[5];
+                let (_, file_type) = dbmedia[2];
+                let (_, unique_id) = dbmedia[3];
+                let (_, file_id) = dbmedia[4];
                 let ftype = ok!(file_type);
                 let im: InputMedia = match ftype {
                     "photo" => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),

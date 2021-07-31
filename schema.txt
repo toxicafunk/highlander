@@ -18,5 +18,4 @@ create table urls(
 select * from media where timestamp <= date('now', '-4 day');
 select * from urls where timestamp <= date('now', '-4 day');
 
-select * from media order by timestamp desc limit 10;
-select * from urls order by timestamp desc limit 10;
+SELECT * FROM media WHERE chat_id = -1001592783264 GROUP BY msg_id ORDER BY timestamp DESC limit 5;
