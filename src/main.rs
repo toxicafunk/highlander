@@ -49,10 +49,10 @@ fn extract_last250(text: &str) -> &str {
 enum Command {
     #[command(description = "display this text.")]
     Help,
-    #[command(description = "retrieves the las n media")]
+    #[command(description = "retrieves the last n stored media")]
     LastMediaStored(u8),
-    #[command(description = "handle a username and an age.", parse_with = "split")]
-    UsernameAndAge { username: String, age: u8 },
+    #[command(description = "retrieves the last n stored urls")]
+    LastUrlStored(u8),
 }
 #[tokio::main]
 async fn main() {
@@ -227,22 +227,34 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
 
 fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -> Status {
     let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
-    let insert = format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table);
     let mut select_stmt = ok!(connection.prepare(select));
     ok!(select_stmt.bind(1, sdo.chat_id));
     ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
     let mut select_cursor = select_stmt.cursor();
     let row = ok!(select_cursor.next());
 
-    log::info!("SDO: {:?}", sdo);
+    let is_media = table == "media";
+    let insert = if is_media {
+        format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
+    } else {
+        format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table)
+    };
+
+    log::info!("table: {}, SDO: {:?}", table, sdo);
+    log::info!("insert: {}, {}", insert, is_media);
     match row {
         None => {
             let mut insert_stmt = ok!(connection.prepare(insert));
-            ok!(insert_stmt.bind(1, sdo.chat_id));
-            ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-            ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-            ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
-            ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
+            if is_media {
+                ok!(insert_stmt.bind(1, sdo.chat_id));
+                ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
+                ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
+                ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
+                ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
+            } else {
+                ok!(insert_stmt.bind(1, sdo.chat_id));
+                ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
+            };
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
             log::info!("Stored {} - {} - {} - {}", sdo.chat_id, sdo.msg_id, sdo.unique_id, acc.text);
@@ -283,8 +295,18 @@ fn handle_command(
             }));
             HResponse::Media(vec)
         }
-        Command::UsernameAndAge { username, age } =>
-            HResponse::URL(vec![format!("Your username is @{} and age is {}.", username, age)])
+        Command::LastUrlStored(num) => {
+            let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
+            let mut vec = Vec::new();
+            ok!(connection.iterate(select, |dbmedia| {
+                let (_, unique_id) = dbmedia[1];
+                let url: String = ok!(unique_id).into();
+                log::info!("unique_id: {}", url);
+                vec.push(format!("* {}", url));
+                true
+            }));
+            HResponse::URL(vec)
+        }
     };
     Ok(r)
 }
