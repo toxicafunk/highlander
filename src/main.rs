@@ -1,5 +1,5 @@
 use teloxide::prelude::*;
-use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
+use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile, ChatMember, ChatMemberKind};
 use sqlite::Connection;
 
 use lazy_static::lazy_static;
@@ -101,30 +101,38 @@ async fn run() {
                         }
                     }
 
-                    let txt_opt = message.update.text();
-                    let bot_name = "ramirez";
+                    let user  = ok!(message.update.from());
+                    let member: ChatMember = ok!(message.requester.get_chat_member(message.update.chat.id, user.id).await);
+                    let is_admin = match member.kind {
+                        ChatMemberKind::Administrator(_) => true,
+                        ChatMemberKind::Creator(_) => true,
+                        _ => false
+                    };
+                    if is_admin {
+                        let txt_opt = message.update.text();
+                        let bot_name = "ramirez";
 
-                    match txt_opt {
-                        Some(txt) => match Command::parse(txt, bot_name) {
-                            Ok(command) => {
-                                let cr = handle_command(&connection, command, message.update.chat_id());
-                                match cr {
-                                    Ok(hr) => match hr {
-                                        HResponse::URL(urls) => {
-                                            let ans = urls.join("\n");
-                                            ok!(message.answer(ans).await);
+                        match txt_opt {
+                            Some(txt) => match Command::parse(txt, bot_name) {
+                                Ok(command) => {
+                                    let cr = handle_command(&connection, command, message.update.chat_id());
+                                    match cr {
+                                        Ok(hr) => match hr {
+                                            HResponse::URL(urls) => {
+                                                let ans = urls.join("\n");
+                                                ok!(message.answer(ans).await);
+                                            },
+                                            HResponse::Media(vec) => {
+                                                ok!(message.answer_media_group(vec).await);
+                                            }
                                         },
-                                        HResponse::Media(vec) => {
-                                            log::info!("Response size: {}\n{:?}", vec.len(), vec);
-                                            ok!(message.answer_media_group(vec).await);
-                                        }
-                                    },
-                                    Err(e) => log::error!("Error: {:?}", e)
+                                        Err(e) => log::error!("Error: {:?}", e)
+                                    }
                                 }
-                            }
-                            Err(_) => ()
-                        },
-                        None => ()
+                                Err(_) => ()
+                            },
+                            None => ()
+                        }
                     }
                 }
             )
@@ -301,7 +309,6 @@ fn handle_command(
             ok!(connection.iterate(select, |dbmedia| {
                 let (_, unique_id) = dbmedia[1];
                 let url: String = ok!(unique_id).into();
-                log::info!("unique_id: {}", url);
                 vec.push(format!("* {}", url));
                 true
             }));
