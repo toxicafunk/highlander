@@ -1,5 +1,5 @@
 use teloxide::prelude::*;
-use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile, ChatMember, ChatMemberKind};
+use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile, ChatMember, ChatMemberStatus};
 use sqlite::Connection;
 
 use lazy_static::lazy_static;
@@ -103,9 +103,9 @@ async fn run() {
 
                     let user  = ok!(message.update.from());
                     let member: ChatMember = ok!(message.requester.get_chat_member(message.update.chat.id, user.id).await);
-                    let is_admin = match member.kind {
-                        ChatMemberKind::Administrator(_) => true,
-                        ChatMemberKind::Creator(_) => true,
+                    let is_admin = match member.status() {
+                        ChatMemberStatus::Administrator => true,
+                        ChatMemberStatus::Creator => true,
                         _ => false
                     };
                     if is_admin {
@@ -249,7 +249,6 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
     };
 
     log::info!("table: {}, SDO: {:?}", table, sdo);
-    log::info!("insert: {}, {}", insert, is_media);
     match row {
         None => {
             let mut insert_stmt = ok!(connection.prepare(insert));
