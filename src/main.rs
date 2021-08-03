@@ -101,38 +101,42 @@ async fn run() {
                         }
                     }
 
-                    let user  = ok!(message.update.from());
-                    let member: ChatMember = ok!(message.requester.get_chat_member(message.update.chat.id, user.id).await);
-                    let is_admin = match member.status() {
-                        ChatMemberStatus::Administrator => true,
-                        ChatMemberStatus::Creator => true,
-                        _ => false
-                    };
-                    if is_admin {
-                        let txt_opt = message.update.text();
-                        let bot_name = "ramirez";
+                    match message.update.from() {
+                        Some(user) => {
+                            let member: ChatMember = ok!(message.requester.get_chat_member(message.update.chat.id, user.id).await);
+                            let is_admin = match member.status() {
+                                ChatMemberStatus::Administrator => true,
+                                ChatMemberStatus::Creator => true,
+                                _ => false
+                            };
+                            if is_admin {
+                                let txt_opt = message.update.text();
+                                let bot_name = "ramirez";
 
-                        match txt_opt {
-                            Some(txt) => match Command::parse(txt, bot_name) {
-                                Ok(command) => {
-                                    let cr = handle_command(&connection, command, message.update.chat_id());
-                                    match cr {
-                                        Ok(hr) => match hr {
-                                            HResponse::URL(urls) => {
-                                                let ans = urls.join("\n");
-                                                ok!(message.answer(ans).await);
-                                            },
-                                            HResponse::Media(vec) => {
-                                                ok!(message.answer_media_group(vec).await);
+                                match txt_opt {
+                                    Some(txt) => match Command::parse(txt, bot_name) {
+                                        Ok(command) => {
+                                            let cr = handle_command(&connection, command, message.update.chat_id());
+                                            match cr {
+                                                Ok(hr) => match hr {
+                                                    HResponse::URL(urls) => {
+                                                        let ans = urls.join("\n");
+                                                        ok!(message.answer(ans).await);
+                                                    },
+                                                    HResponse::Media(vec) => {
+                                                        ok!(message.answer_media_group(vec).await);
+                                                    }
+                                                },
+                                                Err(e) => log::error!("Error: {:?}", e)
                                             }
-                                        },
-                                        Err(e) => log::error!("Error: {:?}", e)
-                                    }
+                                        }
+                                        Err(_) => ()
+                                    },
+                                    None => ()
                                 }
-                                Err(_) => ()
-                            },
-                            None => ()
-                        }
+                            }
+                        },
+                        None => ()
                     }
                 }
             )
