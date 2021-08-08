@@ -1,5 +1,9 @@
+#[macro_use] mod macros;
+
 use teloxide::prelude::*;
-use teloxide::types::{MessageKind, MediaKind, InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile, ChatMember, ChatMemberStatus};
+use teloxide::utils::command::BotCommand;
+use teloxide::types::{MessageKind, MediaKind, ChatMember, ChatMemberStatus};
+
 use sqlite::Connection;
 
 use lazy_static::lazy_static;
@@ -11,32 +15,11 @@ use chrono::Local;
 use pretty_env_logger::env_logger::Builder;
 use log::LevelFilter;
 
-use teloxide::utils::command::BotCommand;
-
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use teloxide::RequestError;
 
-macro_rules! ok(($result:expr) => ($result.unwrap()));
-
-struct Status {
-    action: bool,
-    respond: bool,
-    text: String
-}
-
-#[derive(Debug)]
-struct SDO {
-    chat_id: i64,
-    msg_id: i32,
-    file_type: String,
-    unique_id: String,
-    file_id: Option<String>
-}
-
-enum HResponse {
-    Media(Vec<InputMedia>),
-    URL(Vec<String>)
-}
+use highlander::models::{HResponse, SDO, Status};
+use highlander::commands::*;
+use highlander::duplicates::handle_message;
 
 fn extract_last250(text: &str) -> &str {
     let l = text.len();
@@ -44,16 +27,7 @@ fn extract_last250(text: &str) -> &str {
     text.get(i..l).unwrap_or("")
 }
 
-#[derive(BotCommand)]
-#[command(rename = "lowercase", description = "These commands are supported:")]
-enum Command {
-    #[command(description = "display this text.")]
-    Help,
-    #[command(description = "retrieves the last n stored media")]
-    LastMediaStored(u8),
-    #[command(description = "retrieves the last n stored urls")]
-    LastUrlStored(u8),
-}
+
 #[tokio::main]
 async fn main() {
     run().await;
@@ -235,125 +209,4 @@ fn detect_duplicates(connection: &Connection, message: &UpdateWithCx<AutoSend<Bo
         }
     };
     r
-}
-
-fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -> Status {
-    let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
-    let mut select_stmt = ok!(connection.prepare(select));
-    ok!(select_stmt.bind(1, sdo.chat_id));
-    ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
-    let mut select_cursor = select_stmt.cursor();
-    let row = ok!(select_cursor.next());
-
-    let is_media = table == "media";
-    let insert = if is_media {
-        format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
-    } else {
-        format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table)
-    };
-
-    log::info!("table: {}, SDO: {:?}", table, sdo);
-    match row {
-        None => {
-            let mut insert_stmt = ok!(connection.prepare(insert));
-            if is_media {
-                ok!(insert_stmt.bind(1, sdo.chat_id));
-                ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-                ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-                ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
-                ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
-            } else {
-                ok!(insert_stmt.bind(1, sdo.chat_id));
-                ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
-            };
-            let mut cursor = insert_stmt.cursor();
-            ok!(cursor.next());
-            log::info!("Stored {} - {} - {} - {}", sdo.chat_id, sdo.msg_id, sdo.unique_id, acc.text);
-            acc
-        },
-        Some(_) => {
-            log::info!("Duplicate: {} - {} - {}", sdo.chat_id, sdo.unique_id, acc.text);
-            Status { action: true, respond: true, text: "Mensaje Duplicado: El archivo o url ya se ha compartido en los ultimos 5 dias.".to_string() }
-        }
-    }
-}
-
-fn handle_command(
-    connection: &Connection,
-    command: Command,
-    chat_id: i64,
-) -> Result<HResponse, RequestError> {
-    let r = match command {
-        Command::Help => HResponse::URL(vec![Command::descriptions()]),
-        Command::LastMediaStored(num) => {
-            let select = format!("SELECT * FROM media  WHERE chat_id = {} GROUP BY msg_id ORDER BY timestamp DESC limit {};", chat_id, num);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, file_type) = dbmedia[2];
-                let (_, unique_id) = dbmedia[3];
-                let (_, file_id) = dbmedia[4];
-                let ftype = ok!(file_type);
-                let im: InputMedia = match ftype {
-                    "photo" => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
-                    "video" => InputMedia::Video(InputMediaVideo { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, width: None, height: None, duration: None, supports_streaming: None }),
-                    "audio" => InputMedia::Audio(InputMediaAudio { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, performer: None, title: None, duration: None }),
-                    "animation" => InputMedia::Animation(InputMediaAnimation { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, width: None, height: None, duration: None, thumb: None }),
-                    "document" => InputMedia::Document(InputMediaDocument { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, disable_content_type_detection: None }),
-                    _ => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
-                };
-                vec.push(im);
-                true
-            }));
-            HResponse::Media(vec)
-        }
-        Command::LastUrlStored(num) => {
-            let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, unique_id) = dbmedia[1];
-                let url: String = ok!(unique_id).into();
-                vec.push(format!("* {}", url));
-                true
-            }));
-            HResponse::URL(vec)
-        }
-    };
-    Ok(r)
-}
-
-#[cfg(test)]
-mod tests {
-    use regex::Regex;
-    use crate::extract_last250;
-
-    #[test]
-    fn url_regex() {
-        let t1 = "hola https://twitter.com/plaforscience/status/1379526168513277960";
-        let t2 = "hola https://twitter.com/plaforscience/status/1379526168513277960 y ademas https://youtu.be/GCI0NMgVfPk";
-        let t3 = "https://drive.google.com/file/d/1t3_HeKZDIMEJl5_Y_l7uuIt4IeebCN7e/view?usp=sharing";
-
-        let re: Regex = ok!(Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?"));
-
-        let caps = re.captures_iter(t1);
-        //println!("Found: {}", caps.count());
-        for i in caps {
-            let url = &i[0];
-            println!("{}", url);
-            println!("{}", extract_last250(url))
-        }
-
-        for i in re.captures_iter(t2) {
-            let url = &i[0];
-            println!("{}", url);
-            println!("{}", extract_last250(url))
-        }
-
-        for i in re.captures_iter(t3) {
-            let url = &i[0];
-            println!("{}", url);
-            println!("{}", extract_last250(url))
-        }
-
-        assert_eq!(2 + 2, 4);
-    }
 }
