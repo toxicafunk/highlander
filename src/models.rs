@@ -1,4 +1,6 @@
 use teloxide::types::InputMedia;
+use teloxide::types::Chat;
+use std::sync::Arc;
 
 pub struct Status {
     pub action: bool,
@@ -8,7 +10,7 @@ pub struct Status {
 
 #[derive(Debug)]
 pub struct SDO {
-    pub chat_id: i64,
+    pub chat: Arc<Chat>,
     pub msg_id: i32,
     pub file_type: String,
     pub unique_id: String,

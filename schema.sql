@@ -15,6 +15,22 @@ create table urls(
     PRIMARY KEY (chat_id, unique_id)
 );
 
+create table users(
+    user_id sqlite3_int64,
+    chat_id sqlite3_int64,
+    user_name varchar(250),
+    chat_name varchar(250),
+    PRIMARY KEY (user_id, chat_id)
+);
+
+create table duplicates(
+    chat_id sqlite3_int64,
+    unique_id varchar(16) not null,
+    file_type varchar(9) not null,
+    file_id varchar(90) null,
+    PRIMARY KEY (chat_id, unique_id)
+);
+
 select * from media where timestamp <= date('now', '-4 day');
 select * from urls where timestamp <= date('now', '-4 day');
 
