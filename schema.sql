@@ -28,6 +28,7 @@ create table duplicates(
     unique_id varchar(16) not null,
     file_type varchar(9) not null,
     file_id varchar(90) null,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (chat_id, unique_id)
 );
 

@@ -189,7 +189,10 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
             ok!(insert_stmt.bind(4, sdo.file_id.unwrap_or(String::from("")).as_str()));
 
             let mut cursor = insert_stmt.cursor();
-            ok!(cursor.next());
+            match cursor.next() {
+                Ok(_) => (),
+                Err(_) => (),
+            };
 
             Status { action: true, respond: true, text: format!("Mensaje Duplicado: El {} ya se ha compartido en los ultimos 5 dias.", table) }
         }

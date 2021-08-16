@@ -89,10 +89,15 @@ async fn run() {
                                             match cr {
                                                 Ok(hr) => match hr {
                                                     HResponse::URL(urls) => {
-                                                        let ans = urls.join("\n");
-                                                        ok!(message.answer(ans).await);
+                                                        let ans: String = urls.join("\n");
+                                                        if ans.is_empty() {
+                                                            ok!(message.answer("No results found").await);
+                                                        } else {
+                                                            ok!(message.answer(ans).await);
+                                                        }
                                                     },
                                                     HResponse::Media(vec) => {
+                                                        log::info!("{:?}", vec);
                                                         ok!(message.answer_media_group(vec).await);
                                                     }
                                                 },
