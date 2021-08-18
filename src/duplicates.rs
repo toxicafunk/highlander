@@ -181,7 +181,7 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
         },
         Some(_) => {
             log::info!("Duplicate: {} - {} - {}", sdo.chat.id, sdo.unique_id, acc.text);
-            let insert = "INSERT INTO duplicates (chat_id, file_id, file_type, unique_id) VALUES (?, ?, ?, ?)";
+            let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id) VALUES (?, ?, ?, ?)";
             let mut insert_stmt = ok!(connection.prepare(insert));
             ok!(insert_stmt.bind(1, sdo.chat.id));
             ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));

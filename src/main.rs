@@ -80,7 +80,8 @@ async fn run() {
                             };
                             if is_admin {
                                 let txt_opt = message.update.text();
-                                let bot_name = "ramirez";
+                                let bot_name = "highlander";
+                                //let bot_name = "ramirez";
 
                                 match txt_opt {
                                     Some(txt) => match Command::parse(txt, bot_name) {
@@ -97,8 +98,10 @@ async fn run() {
                                                         }
                                                     },
                                                     HResponse::Media(vec) => {
-                                                        log::info!("{:?}", vec);
-                                                        ok!(message.answer_media_group(vec).await);
+                                                        match message.answer_media_group(vec).await {
+                                                            Ok(_) => (),
+                                                            Err(e) => log::error!("Error: {:?}", e)
+                                                        }
                                                     }
                                                 },
                                                 Err(e) => log::error!("Error: {:?}", e)
