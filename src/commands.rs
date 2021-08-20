@@ -82,11 +82,11 @@ pub fn handle_command(
             HResponse::Media(vec)
         },
         Command::LastDuplicateUrls(num) => {
-            let select = format!("SELECT file_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
+            let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
-                let (_, file_id) = dbmedia[0];
-                let url: String = ok!(file_id).into();
+                let (_, unique_id) = dbmedia[0];
+                let url: String = ok!(unique_id).into();
                 vec.push(format!("* {}", url));
                 true
             }));
