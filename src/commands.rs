@@ -1,7 +1,16 @@
 use teloxide::RequestError;
 use teloxide::types::{InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
 use teloxide::utils::command::BotCommand;
+
+use grammers_client::{Client, Config, InitParams};
+use grammers_session::Session;
+use grammers_client::client::chats::ParticipantIter;
+//use grammers_client::types::Chat as ClientChat;
+
 use sqlite::Connection;
+
+use std::env;
+use std::collections::VecDeque;
 
 use super::models::HResponse;
 
@@ -22,7 +31,11 @@ pub enum Command {
     LastDuplicateMedia(u8),
     #[command(description = "list a user's groups")]
     ListUserGroups(i64),
+    #[command(description = "find all users on multiple groups")]
+    GetChatParticipants,
 }
+
+const SESSION_FILE: &str = "echo.session";
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
     match ftype {
@@ -38,7 +51,7 @@ fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&st
 pub fn handle_command(
     connection: &Connection,
     command: Command,
-    chat_id: i64,
+    chat_id: i64
 ) -> Result<HResponse, RequestError> {
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
@@ -55,7 +68,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastUrlStored(num) => {
             let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -66,7 +79,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::LastDuplicateMedia(num) => {
             let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -80,7 +93,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastDuplicateUrls(num) => {
             let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -91,7 +104,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::FindInterUsers => {
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
@@ -111,7 +124,6 @@ pub fn handle_command(
             let select = format!("SELECT chat_id, chat_name FROM users WHERE user_id = {};", id);
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
-                log::info!("{:?}", dbmedia);
                 let (_, chat_id) = dbmedia[0];
                 let (_, chat_name) = dbmedia[1];
                 let hit = format!("GroupId: {}, GroupName: {}", ok!(chat_id), ok!(chat_name));
@@ -119,6 +131,54 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
+        }
+        Command::GetChatParticipants => {
+            let api_id = match env::var("TG_ID") {
+                Ok(s) => s.parse::<i32>().unwrap(),
+                Err(_) => 0,
+            };
+            let api_hash = ok!(env::var("TG_HASH"));
+            let token = ok!(env::var("TELOXIDE_TOKEN"));
+
+            println!("Connecting to Telegram...");
+
+            let fut = async {
+                let mut client: Client = ok!(Client::connect(Config {
+                    session: ok!(Session::load_file_or_create(SESSION_FILE)),
+                    api_id,
+                    api_hash: api_hash.clone(),
+                    params: InitParams {
+                        // Fetch the updates we missed while we were offline
+                        catch_up: true,
+                        ..Default::default()
+                    },
+                })
+                .await);
+
+                println!("Connected!");
+
+                if !ok!(client.is_authorized().await) {
+                    println!("Signing in...");
+                    ok!(client.bot_sign_in(&token, api_id, &api_hash).await);
+                    ok!(client.session().save_to_file(SESSION_FILE));
+                    println!("Signed in!");
+                }
+
+                let select = "SELECT DISTINCT chat_id from users;";
+                ok!(connection.iterate(select, |dbmedia| {
+                    log::info!("{:?}", dbmedia);
+                    let (_, chatid) = dbmedia[0];
+                    let chat_id = ok!(chatid.unwrap().parse::<i32>());
+                    let fut = async {
+                        let mut participants = ParticipantIter::Chat { client: client.clone(), chat_id,  buffer: VecDeque::new(), total: None };
+                        while let Some(participant) = ok!(participants.next().await) {
+                            log::info!("{} has role {:?}", participant.user.first_name(), participant.role);
+                        }
+                    };
+                    true
+                }));
+            };
+            HResponse::Media(Vec::new())
         }
     };
     Ok(r)

@@ -146,7 +146,7 @@ fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
     }
 }
 fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -> Status {
-    let select = format!("SELECT unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
+    let select = format!("SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
     let mut select_stmt = ok!(connection.prepare(select));
     ok!(select_stmt.bind(1, sdo.chat.id));
     ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
@@ -179,8 +179,9 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
             log::info!("Stored {} - {} - {} - {}", sdo.chat.id, sdo.msg_id, sdo.unique_id, acc.text);
             acc
         },
-        Some(_) => {
+        Some(r) => {
             log::info!("Duplicate: {} - {} - {}", sdo.chat.id, sdo.unique_id, acc.text);
+            log::info!("{:?}", r);
             let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id) VALUES (?, ?, ?, ?)";
             let mut insert_stmt = ok!(connection.prepare(insert));
             ok!(insert_stmt.bind(1, sdo.chat.id));
@@ -194,7 +195,16 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
                 Err(_) => (),
             };
 
-            Status { action: true, respond: true, text: format!("Mensaje Duplicado: El {} ya se ha compartido en los ultimos 5 dias.", table) }
+            let orig_chat_id = match r[0].as_integer(){
+                Some(c) => match c.to_string().strip_prefix("-100") {
+                    Some(s) => s.parse::<i64>().unwrap_or(c),
+                    None => 0,
+                }
+                None => 0,
+            };
+            let orig_msg_id = ok!(r[1].as_integer());
+            log::info!("{} - {}", orig_chat_id, orig_msg_id);
+            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias. https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
         }
     }
 }

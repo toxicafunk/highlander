@@ -1,4 +1,5 @@
-#[macro_use] mod macros;
+#[macro_use]
+mod macros;
 
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommand;
@@ -6,9 +7,9 @@ use teloxide::types::{ChatMember, ChatMemberStatus};
 
 use sqlite::Connection;
 
+use std::io::Write;
 use std::env;
 
-use std::io::Write;
 use chrono::Local;
 use pretty_env_logger::env_logger::Builder;
 use log::LevelFilter;
@@ -36,6 +37,7 @@ async fn run() {
         })
         .filter(None, LevelFilter::Info)
         .init();
+
     log::info!("Starting Highlander bot...");
 
     let bot = Bot::from_env().auto_send();
@@ -51,7 +53,6 @@ async fn run() {
                     };
 
                     let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
-
                     match message.update.from() {
                         Some(user) => {
                             // Handle normal messages
@@ -80,8 +81,8 @@ async fn run() {
                             };
                             if is_admin {
                                 let txt_opt = message.update.text();
-                                let bot_name = "highlander";
-                                //let bot_name = "ramirez";
+                                //let bot_name = "highlander";
+                                let bot_name = "ramirez";
 
                                 match txt_opt {
                                     Some(txt) => match Command::parse(txt, bot_name) {
@@ -96,7 +97,7 @@ async fn run() {
                                                         } else {
                                                             ok!(message.answer(ans).await);
                                                         }
-                                                    },
+                                                    }
                                                     HResponse::Media(vec) => {
                                                         match message.answer_media_group(vec).await {
                                                             Ok(_) => (),
@@ -111,11 +112,13 @@ async fn run() {
                                     },
                                     None => ()
                                 }
+                            } else {
+                                ok!(message.answer("Necesita permisos de admin").await);
                             }
-                        },
+                        }
                         None => ()
                     }
-                }
+                },
             )
         })
         .dispatch()
