@@ -147,11 +147,7 @@ fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
 }
 fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
-    let select = if is_media {
-        format!("SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table)
-    } else {
-        format!("SELECT chat_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table)
-    };
+    let select = format!("SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?", table);
     let mut select_stmt = ok!(connection.prepare(select));
     ok!(select_stmt.bind(1, sdo.chat.id));
     ok!(select_stmt.bind(2, sdo.unique_id.as_str()));

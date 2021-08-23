@@ -10,6 +10,7 @@ create table media(
 
 create table urls(
     chat_id sqlite3_int64,
+    msg_id sqlite3_int32,
     unique_id varchar(250) not null,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (chat_id, unique_id)

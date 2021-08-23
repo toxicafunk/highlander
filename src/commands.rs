@@ -2,15 +2,14 @@ use teloxide::RequestError;
 use teloxide::types::{InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
 use teloxide::utils::command::BotCommand;
 
-use grammers_client::{Client, Config, InitParams};
-use grammers_session::Session;
-use grammers_client::client::chats::ParticipantIter;
-//use grammers_client::types::Chat as ClientChat;
+//use grammers_client::{Client, Config, InitParams};
+//use grammers_session::Session;
+//use grammers_client::client::chats::ParticipantIter;
 
 use sqlite::Connection;
 
-use std::env;
-use std::collections::VecDeque;
+//use std::env;
+//use std::collections::VecDeque;
 
 use super::models::HResponse;
 
@@ -31,11 +30,11 @@ pub enum Command {
     LastDuplicateMedia(u8),
     #[command(description = "list a user's groups")]
     ListUserGroups(i64),
-    #[command(description = "find all users on multiple groups")]
-    GetChatParticipants,
+    //#[command(description = "find all users on multiple groups")]
+    //GetChatParticipants,
 }
 
-const SESSION_FILE: &str = "echo.session";
+//const SESSION_FILE: &str = "echo.session";
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
     match ftype {
@@ -68,7 +67,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        }
+        },
         Command::LastUrlStored(num) => {
             let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -79,7 +78,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::LastDuplicateMedia(num) => {
             let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -93,7 +92,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        }
+        },
         Command::LastDuplicateUrls(num) => {
             let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -104,7 +103,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::FindInterUsers => {
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
@@ -119,7 +118,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::ListUserGroups(id) => {
             let select = format!("SELECT chat_id, chat_name FROM users WHERE user_id = {};", id);
             let mut vec = Vec::new();
@@ -131,8 +130,8 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
-        Command::GetChatParticipants => {
+        },
+        /*Command::GetChatParticipants => {
             let api_id = match env::var("TG_ID") {
                 Ok(s) => s.parse::<i32>().unwrap(),
                 Err(_) => 0,
@@ -179,7 +178,7 @@ pub fn handle_command(
                 }));
             };
             HResponse::Media(Vec::new())
-        }
+        }*/
     };
     Ok(r)
 }
