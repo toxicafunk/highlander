@@ -157,7 +157,7 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
     let insert = if is_media {
         format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
     } else {
-        format!("INSERT INTO {} (chat_id, unique_id) VALUES (?, ?)", table)
+        format!("INSERT INTO {} (chat_id, msg_id, unique_id) VALUES (?, ?, ?)", table)
     };
 
     log::info!("table: {}, SDO: {:?}", table, sdo);
@@ -172,7 +172,8 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
                 ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
             } else {
                 ok!(insert_stmt.bind(1, sdo.chat.id));
-                ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
+                ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
+                ok!(insert_stmt.bind(3, sdo.unique_id.as_str()));
             };
             let mut cursor = insert_stmt.cursor();
             ok!(cursor.next());
