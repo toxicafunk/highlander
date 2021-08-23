@@ -112,8 +112,6 @@ async fn run() {
                                     },
                                     None => ()
                                 }
-                            } else {
-                                ok!(message.answer("Necesita permisos de admin").await);
                             }
                         }
                         None => ()
