@@ -2,14 +2,14 @@ use teloxide::RequestError;
 use teloxide::types::{InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
 use teloxide::utils::command::BotCommand;
 
-//use grammers_client::{Client, Config, InitParams};
-//use grammers_session::Session;
-//use grammers_client::client::chats::ParticipantIter;
-
 use sqlite::Connection;
 
-//use std::env;
-//use std::collections::VecDeque;
+//use futures::executor::block_on;
+
+use std::env;
+
+use rtdlib::Tdlib;
+use rtdlib::types::*;
 
 use super::models::HResponse;
 
@@ -30,11 +30,9 @@ pub enum Command {
     LastDuplicateMedia(u8),
     #[command(description = "list a user's groups")]
     ListUserGroups(i64),
-    //#[command(description = "find all users on multiple groups")]
-    //GetChatParticipants,
+    #[command(description = "find all users on multiple groups")]
+    GetChatParticipants,
 }
-
-//const SESSION_FILE: &str = "echo.session";
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
     match ftype {
@@ -50,7 +48,7 @@ fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&st
 pub fn handle_command(
     connection: &Connection,
     command: Command,
-    chat_id: i64
+    chat_id: i64,
 ) -> Result<HResponse, RequestError> {
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
@@ -67,7 +65,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastUrlStored(num) => {
             let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -78,7 +76,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::LastDuplicateMedia(num) => {
             let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -92,7 +90,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastDuplicateUrls(num) => {
             let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -103,7 +101,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::FindInterUsers => {
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
@@ -118,7 +116,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::ListUserGroups(id) => {
             let select = format!("SELECT chat_id, chat_name FROM users WHERE user_id = {};", id);
             let mut vec = Vec::new();
@@ -130,55 +128,115 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
-        /*Command::GetChatParticipants => {
-            let api_id = match env::var("TG_ID") {
-                Ok(s) => s.parse::<i32>().unwrap(),
-                Err(_) => 0,
-            };
-            let api_hash = ok!(env::var("TG_HASH"));
-            let token = ok!(env::var("TELOXIDE_TOKEN"));
+        }
+        Command::GetChatParticipants => {
+            log::info!("Connecting to Telegram...");
+            let chat_ids = get_chat_ids(connection);
+            log::info!("chats: {:?}", chat_ids);
+            get_participants(chat_ids);
 
-            println!("Connecting to Telegram...");
-
-            let fut = async {
-                let mut client: Client = ok!(Client::connect(Config {
-                    session: ok!(Session::load_file_or_create(SESSION_FILE)),
-                    api_id,
-                    api_hash: api_hash.clone(),
-                    params: InitParams {
-                        // Fetch the updates we missed while we were offline
-                        catch_up: true,
-                        ..Default::default()
-                    },
-                })
-                .await);
-
-                println!("Connected!");
-
-                if !ok!(client.is_authorized().await) {
-                    println!("Signing in...");
-                    ok!(client.bot_sign_in(&token, api_id, &api_hash).await);
-                    ok!(client.session().save_to_file(SESSION_FILE));
-                    println!("Signed in!");
-                }
-
-                let select = "SELECT DISTINCT chat_id from users;";
-                ok!(connection.iterate(select, |dbmedia| {
-                    log::info!("{:?}", dbmedia);
-                    let (_, chatid) = dbmedia[0];
-                    let chat_id = ok!(chatid.unwrap().parse::<i32>());
-                    let fut = async {
-                        let mut participants = ParticipantIter::Chat { client: client.clone(), chat_id,  buffer: VecDeque::new(), total: None };
-                        while let Some(participant) = ok!(participants.next().await) {
-                            log::info!("{} has role {:?}", participant.user.first_name(), participant.role);
-                        }
-                    };
-                    true
-                }));
-            };
-            HResponse::Media(Vec::new())
-        }*/
+            HResponse::URL(Vec::new())
+        }
     };
     Ok(r)
+}
+
+fn get_participants(chat_ids: Vec<i64>) {
+    let api_id = match env::var("TG_ID") {
+        Ok(s) => s.parse::<i32>().unwrap(),
+        Err(_) => 0,
+    };
+    let api_hash = ok!(env::var("TG_HASH"));
+    let token = ok!(env::var("TELOXIDE_TOKEN"));
+
+    let tdlib = Tdlib::new();
+    ok!(Tdlib::set_log_verbosity_level(3));
+
+    loop {
+        match tdlib.receive(2.0) {
+            Some(event) => {
+                log::info!("Event: {:?}", event);
+                match serde_json::from_str::<UpdateAuthorizationState>(&event[..]) {
+                    Ok(state) => {
+                        if state.authorization_state().is_closed() {
+                            log::info!("Authorization closed!");
+                            break;
+                        }
+                        if state.authorization_state().is_ready() {
+                            log::info!("Authorization ready!");
+                            break;
+                        }
+                        if state.authorization_state().is_wait_encryption_key() {
+                            tdlib.send(r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#);
+                            let bot_auth = format!("{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}", token);
+                            tdlib.send(bot_auth.as_str());
+                        }
+                        if state.authorization_state().is_wait_tdlib_parameters() {
+                            let set_parameters = format!("{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
+                                    \"api_id\":\"{}\",\
+                                    \"api_hash\":\"{}\",\
+                                    \"bot_auth_token\":\"{}\",\
+                                    \"database_directory\":\"tdlib\",\
+                                    \"system_language_code\":\"en\",\
+                                    \"device_model\":\"Desktop\",\
+                                    \"application_version\":\"1.0.0\"\
+                                    }} }}", api_id, api_hash, token);
+                            log::info!("{}", set_parameters);
+                            tdlib.send(set_parameters.as_str());
+                        }
+                        if state.authorization_state().is_wait_phone_number() {
+                            log::info!("Wait phone number");
+                        }
+                        if state.authorization_state().is_wait_password() {
+                            log::info!("Wait password");
+                        }
+                        if state.authorization_state().is_wait_code() {
+                            log::info!("Wait code");
+                        }
+                        if state.authorization_state().is_wait_registration() {
+                            log::info!("Wait registration");
+                        }
+                    }
+                    Err(_) => ()
+                }
+            }
+            None => ()
+        }
+    }
+
+    for id in chat_ids {
+        //block_on(get_participants(id));
+        log::info!("chat_id: {}", id);
+        let chat_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"0\",\"limit\":\"10\" }}", id);
+        tdlib.send(chat_request.as_str());
+    }
+
+    loop {
+        match tdlib.receive(5.0) {
+            /*Some(response) => match serde_json::from_str::<ChatMembers>(&response[..]) {
+                Ok(members) => {
+                    log::info!("ChatMembers: {:?}", members)
+                },
+                Err(e) => log::error!("Error: {}", e)
+            },*/
+            Some(response) => log::info!("Response: {}", response),
+            None => break
+        }
+    }
+    log::info!("No more updates");
+}
+
+fn get_chat_ids(connection: &Connection) -> Vec<i64> {
+    let select = "SELECT DISTINCT chat_id from users;";
+    let mut vec = Vec::new();
+    ok!(connection.iterate(select, |dbmedia| {
+        log::info!("{:?}", dbmedia);
+        let (_, chatid) = dbmedia[0];
+        let chatid = chatid.unwrap();
+        let chatid = if chatid.starts_with("-") { chatid.strip_prefix("-100") } else { chatid.strip_prefix("100") };
+        let chat_id = ok!(chatid.unwrap().parse::<i64>());
+        vec.push(chat_id);
+        true
+    }));
+    vec
 }

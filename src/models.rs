@@ -1,6 +1,10 @@
 use teloxide::types::InputMedia;
 use teloxide::types::Chat;
+
 use std::sync::Arc;
+use std::env;
+
+use sqlite::Connection;
 
 pub struct Status {
     pub action: bool,
@@ -20,4 +24,14 @@ pub struct SDO {
 pub enum HResponse {
     Media(Vec<InputMedia>),
     URL(Vec<String>)
+}
+
+pub fn create_connection() -> Connection {
+    let db_path = match env::var("HIGHLANDER_DB_PATH") {
+        Ok(path) => path,
+        Err(_) => String::from("."),
+    };
+
+    let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
+    connection
 }

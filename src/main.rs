@@ -5,10 +5,7 @@ use teloxide::prelude::*;
 use teloxide::utils::command::BotCommand;
 use teloxide::types::{ChatMember, ChatMemberStatus};
 
-use sqlite::Connection;
-
 use std::io::Write;
-use std::env;
 
 use chrono::Local;
 use pretty_env_logger::env_logger::Builder;
@@ -16,7 +13,7 @@ use log::LevelFilter;
 
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use highlander::models::HResponse;
+use highlander::models::{HResponse, create_connection};
 use highlander::commands::*;
 use highlander::duplicates::detect_duplicates;
 
@@ -47,12 +44,8 @@ async fn run() {
             UnboundedReceiverStream::new(rx).for_each_concurrent(
                 None,
                 |message| async move {
-                    let db_path = match env::var("HIGHLANDER_DB_PATH") {
-                        Ok(path) => path,
-                        Err(_) => String::from("."),
-                    };
+                    let connection = create_connection();
 
-                    let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
                     match message.update.from() {
                         Some(user) => {
                             // Handle normal messages
@@ -81,8 +74,8 @@ async fn run() {
                             };
                             if is_admin {
                                 let txt_opt = message.update.text();
-                                let bot_name = "highlander";
-                                //let bot_name = "ramirez";
+                                //let bot_name = "highlander";
+                                let bot_name = "ramirez";
 
                                 match txt_opt {
                                     Some(txt) => match Command::parse(txt, bot_name) {
