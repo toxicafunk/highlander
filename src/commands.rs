@@ -204,23 +204,64 @@ fn get_participants(chat_ids: Vec<i64>) {
         }
     }
 
+    let mut i = 0;
+    let mut offset = 0;
     for id in chat_ids {
         //block_on(get_participants(id));
         log::info!("chat_id: {}", id);
-        let chat_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"0\",\"limit\":\"10\" }}", id);
+        let chat_request = format!("{{\"@type\":\"getChat\",\"chat_id\":\"{}\" }}", id);
         tdlib.send(chat_request.as_str());
     }
 
     loop {
         match tdlib.receive(5.0) {
-            /*Some(response) => match serde_json::from_str::<ChatMembers>(&response[..]) {
-                Ok(members) => {
-                    log::info!("ChatMembers: {:?}", members)
-                },
-                Err(e) => log::error!("Error: {}", e)
-            },*/
-            Some(response) => log::info!("Response: {}", response),
-            None => break
+            Some(response) => {
+                log::info!("Response: {}", response);
+                match serde_json::from_str::<serde_json::Value>(&response[..]) {
+                    Ok(v) => {
+                        let v1 = v.clone();
+                        if v["@type"] == "chat" {
+                            let chat: Chat = ok!(serde_json::from_value(v1));
+                            let supergroup = ok!(chat.type_().as_supergroup());
+                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
+                            let members_request = serde_json::json!({
+                                "@type": "getSupergroupMembers",
+                                "supergroup_id": supergroup.supergroup_id(),
+                                "offset": offset,
+                                "limit": 200
+                            });
+                            tdlib.send(members_request.to_string().as_str());
+                        }
+                        if v["@type"] == "chatMembers" {
+                            let members: ChatMembers = ok!(serde_json::from_value(v1));
+                            let count = members.total_count();
+                            for member in members.members() {
+                                match member.bot_info() {
+                                    Some(_) => (),
+                                    None => log::info!("Member: {}", member.user_id())
+                                }
+                            }
+                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
+                            if offset + limit < total_count {
+                                offset += limit;
+                                let members_request = serde_json::json!({
+                                    "@type": "getSupergroupMembers",
+                                    "supergroup_id": supergroup.supergroup_id(),
+                                    "offset": offset,
+                                    "limit": 200
+                                });
+                                tdlib.send(members_request.to_string().as_str());
+                            }
+q
+                        }
+                    },
+                    Err(e) => log::error!("Error: {}", e)
+                }
+            },
+            None => if i <= 3 {
+                i += 1;
+                log::info!("{} timeout", i)
+            } else { break }
         }
     }
     log::info!("No more updates");
@@ -229,11 +270,12 @@ fn get_participants(chat_ids: Vec<i64>) {
 fn get_chat_ids(connection: &Connection) -> Vec<i64> {
     let select = "SELECT DISTINCT chat_id from users;";
     let mut vec = Vec::new();
+
     ok!(connection.iterate(select, |dbmedia| {
         log::info!("{:?}", dbmedia);
         let (_, chatid) = dbmedia[0];
-        let chatid = chatid.unwrap();
-        let chatid = if chatid.starts_with("-") { chatid.strip_prefix("-100") } else { chatid.strip_prefix("100") };
+        /*let chatid = chatid.unwrap();
+        let chatid = if chatid.starts_with("-") { chatid.strip_prefix("-100") } else { chatid.strip_prefix("100") };*/
         let chat_id = ok!(chatid.unwrap().parse::<i64>());
         vec.push(chat_id);
         true
