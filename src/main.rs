@@ -97,6 +97,12 @@ async fn run() {
                                                             Err(e) => log::error!("Error: {:?}", e)
                                                         }
                                                     }
+                                                    HResponse::Text(msg) => {
+                                                        match message.answer(msg).await {
+                                                            Ok(_) => (),
+                                                            Err(e) => log::error!("Error: {:?}", e)
+                                                        }
+                                                    },
                                                 },
                                                 Err(e) => log::error!("Error: {:?}", e)
                                             }

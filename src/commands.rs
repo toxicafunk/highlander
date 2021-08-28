@@ -50,6 +50,7 @@ pub fn handle_command(
     command: Command,
     chat_id: i64,
 ) -> Result<HResponse, RequestError> {
+    let get_participants_reply = String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
         Command::LastMediaStored(num) => {
@@ -65,7 +66,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        }
+        },
         Command::LastUrlStored(num) => {
             let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -76,7 +77,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::LastDuplicateMedia(num) => {
             let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -90,7 +91,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        }
+        },
         Command::LastDuplicateUrls(num) => {
             let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -101,7 +102,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::FindInterUsers => {
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
@@ -116,7 +117,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::ListUserGroups(id) => {
             let select = format!("SELECT chat_id, chat_name FROM users WHERE user_id = {};", id);
             let mut vec = Vec::new();
@@ -128,20 +129,20 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        },
         Command::GetChatParticipants => {
             log::info!("Connecting to Telegram...");
             let chat_ids = get_chat_ids(connection);
             log::info!("chats: {:?}", chat_ids);
-            get_participants(chat_ids);
+            get_participants(connection, chat_ids);
 
-            HResponse::URL(Vec::new())
+            HResponse::Text(get_participants_reply)
         }
     };
     Ok(r)
 }
 
-fn get_participants(chat_ids: Vec<i64>) {
+fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
     let api_id = match env::var("TG_ID") {
         Ok(s) => s.parse::<i32>().unwrap(),
         Err(_) => 0,
@@ -149,7 +150,7 @@ fn get_participants(chat_ids: Vec<i64>) {
     let api_hash = ok!(env::var("TG_HASH"));
     let token = ok!(env::var("TELOXIDE_TOKEN"));
 
-    let tdlib = Tdlib::new();
+    let tdlib: Tdlib = Tdlib::new();
     ok!(Tdlib::set_log_verbosity_level(3));
 
     loop {
@@ -204,14 +205,25 @@ fn get_participants(chat_ids: Vec<i64>) {
         }
     }
 
-    let mut i = 0;
-    let mut offset = 0;
     for id in chat_ids {
         //block_on(get_participants(id));
         log::info!("chat_id: {}", id);
         let chat_request = format!("{{\"@type\":\"getChat\",\"chat_id\":\"{}\" }}", id);
         tdlib.send(chat_request.as_str());
+        process_chat(connection, &tdlib,id);
     }
+
+    log::info!("No more updates");
+}
+
+const LIMIT: i64 = 200;
+
+fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
+    let mut i: i64 = 0;
+    let mut offset: i64 = 0;
+    let mut supergroup_id: i64 = 0;
+    let mut chat_name = String::new();
+    let unknown = "Unknown";
 
     loop {
         match tdlib.receive(5.0) {
@@ -219,40 +231,57 @@ fn get_participants(chat_ids: Vec<i64>) {
                 log::info!("Response: {}", response);
                 match serde_json::from_str::<serde_json::Value>(&response[..]) {
                     Ok(v) => {
-                        let v1 = v.clone();
                         if v["@type"] == "chat" {
-                            let chat: Chat = ok!(serde_json::from_value(v1));
-                            let supergroup = ok!(chat.type_().as_supergroup());
-                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
-                            let members_request = serde_json::json!({
-                                "@type": "getSupergroupMembers",
-                                "supergroup_id": supergroup.supergroup_id(),
-                                "offset": offset,
-                                "limit": 200
-                            });
-                            tdlib.send(members_request.to_string().as_str());
-                        }
-                        if v["@type"] == "chatMembers" {
-                            let members: ChatMembers = ok!(serde_json::from_value(v1));
-                            let count = members.total_count();
-                            for member in members.members() {
-                                match member.bot_info() {
-                                    Some(_) => (),
-                                    None => log::info!("Member: {}", member.user_id())
-                                }
-                            }
-                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
-                            if offset + limit < total_count {
-                                offset += limit;
+                            let chat: Chat = ok!(serde_json::from_value(v.clone()));
+                            let chat = chat.clone();
+                            if chat_id == chat.id() {
+                                chat_name = chat.title().clone();
+                                let supergroup = ok!(chat.type_().as_supergroup());
+                                supergroup_id = supergroup.supergroup_id();
+                                //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
                                 let members_request = serde_json::json!({
                                     "@type": "getSupergroupMembers",
-                                    "supergroup_id": supergroup.supergroup_id(),
+                                    "supergroup_id": supergroup_id,
                                     "offset": offset,
                                     "limit": 200
                                 });
                                 tdlib.send(members_request.to_string().as_str());
                             }
-q
+                        }
+                        if v["@type"] == "chatMembers" {
+                            let members: ChatMembers = ok!(serde_json::from_value(v.clone()));
+                            let total_count = members.total_count();
+                            for member in members.members() {
+                                match member.bot_info() {
+                                    Some(_) => (),
+                                    None => {
+                                        log::info!("Member: {}", member.user_id());
+                                        let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
+                                        let mut insert_stmt = ok!(connection.prepare(insert));
+                                        ok!(insert_stmt.bind(1, member.user_id()));
+                                        ok!(insert_stmt.bind(2, chat_id));
+                                        ok!(insert_stmt.bind(3, unknown));
+                                        ok!(insert_stmt.bind(4, chat_name.as_str()));
+
+                                        let mut cursor = insert_stmt.cursor();
+                                        match cursor.next() {
+                                            Ok(_) => (),
+                                            Err(e) => log::warn!("Expected error: {}", e)
+                                        }
+                                    }
+                                }
+                            }
+                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
+                            if (offset + LIMIT) < total_count {
+                                offset += LIMIT;
+                                let members_request = serde_json::json!({
+                                    "@type": "getSupergroupMembers",
+                                    "supergroup_id": supergroup_id,
+                                    "offset": offset,
+                                    "limit": LIMIT
+                                });
+                                tdlib.send(members_request.to_string().as_str());
+                            }
                         }
                     },
                     Err(e) => log::error!("Error: {}", e)
@@ -264,7 +293,6 @@ q
             } else { break }
         }
     }
-    log::info!("No more updates");
 }
 
 fn get_chat_ids(connection: &Connection) -> Vec<i64> {

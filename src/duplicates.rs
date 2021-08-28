@@ -129,19 +129,22 @@ fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
         Some(_) => (),
         None => {
             log::info!("Storing user...");
-            let chat_name = match &chat.kind {
-                ChatKind::Public(public) => public.title.as_ref().unwrap_or(&unknown) as &str,
-                ChatKind::Private(private) => private.username.as_ref().unwrap_or(&unknown)
-            };
-            let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
-            let mut insert_stmt = ok!(connection.prepare(insert));
-            ok!(insert_stmt.bind(1, user.id));
-            ok!(insert_stmt.bind(2, chat.id));
-            ok!(insert_stmt.bind(3, user.username.as_ref().unwrap_or(&user.first_name.to_string()) as &str));
-            ok!(insert_stmt.bind(4, &chat_name as &str));
+            match &chat.kind {
+                ChatKind::Public(public) => {
+                    let chat_name = public.title.as_ref().unwrap_or(&unknown) as &str;
+                    let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
+                    let mut insert_stmt = ok!(connection.prepare(insert));
+                    ok!(insert_stmt.bind(1, user.id));
+                    ok!(insert_stmt.bind(2, chat.id));
+                    ok!(insert_stmt.bind(3, user.username.as_ref().unwrap_or(&user.first_name.to_string()) as &str));
+                    ok!(insert_stmt.bind(4, &chat_name as &str));
 
-            let mut cursor = insert_stmt.cursor();
-            ok!(cursor.next());
+                    let mut cursor = insert_stmt.cursor();
+                    ok!(cursor.next());
+                },
+                ChatKind::Private(_) => ()
+                //private.username.as_ref().unwrap_or(&unknown)
+            };
         }
     }
 }

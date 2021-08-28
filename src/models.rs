@@ -23,7 +23,8 @@ pub struct SDO {
 
 pub enum HResponse {
     Media(Vec<InputMedia>),
-    URL(Vec<String>)
+    URL(Vec<String>),
+    Text(String)
 }
 
 pub fn create_connection() -> Connection {
