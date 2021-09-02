@@ -253,9 +253,8 @@ fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
                                 Ok(members) => {
                                     let total_count = members.total_count();
                                     for member in members.members() {
-                                        match member.bot_info() {
-                                            Some(_) => (),
-                                            None => {
+                                        match member.member_id() {
+                                            MessageSender::User(member) =>  {
                                                 log::info!("Member: {}", member.user_id());
                                                 let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
                                                 let mut insert_stmt = ok!(connection.prepare(insert));
@@ -269,7 +268,9 @@ fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
                                                     Ok(_) => (),
                                                     Err(e) => log::warn!("Expected error: {}", e)
                                                 }
-                                            }
+                                            },
+                                            MessageSender::Chat(chat) => log::warn!("Ignore {}", chat.chat_id()),
+                                            MessageSender::_Default(_) => {}
                                         }
                                     }
                                     //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
