@@ -249,38 +249,42 @@ fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
                             }
                         }
                         if v["@type"] == "chatMembers" {
-                            let members: ChatMembers = ok!(serde_json::from_value(v.clone()));
-                            let total_count = members.total_count();
-                            for member in members.members() {
-                                match member.bot_info() {
-                                    Some(_) => (),
-                                    None => {
-                                        log::info!("Member: {}", member.user_id());
-                                        let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
-                                        let mut insert_stmt = ok!(connection.prepare(insert));
-                                        ok!(insert_stmt.bind(1, member.user_id()));
-                                        ok!(insert_stmt.bind(2, chat_id));
-                                        ok!(insert_stmt.bind(3, unknown));
-                                        ok!(insert_stmt.bind(4, chat_name.as_str()));
+                            match  serde_json::from_value::<ChatMembers>(v.clone()) {
+                                Ok(members) => {
+                                    let total_count = members.total_count();
+                                    for member in members.members() {
+                                        match member.bot_info() {
+                                            Some(_) => (),
+                                            None => {
+                                                log::info!("Member: {}", member.user_id());
+                                                let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
+                                                let mut insert_stmt = ok!(connection.prepare(insert));
+                                                ok!(insert_stmt.bind(1, member.user_id()));
+                                                ok!(insert_stmt.bind(2, chat_id));
+                                                ok!(insert_stmt.bind(3, unknown));
+                                                ok!(insert_stmt.bind(4, chat_name.as_str()));
 
-                                        let mut cursor = insert_stmt.cursor();
-                                        match cursor.next() {
-                                            Ok(_) => (),
-                                            Err(e) => log::warn!("Expected error: {}", e)
+                                                let mut cursor = insert_stmt.cursor();
+                                                match cursor.next() {
+                                                    Ok(_) => (),
+                                                    Err(e) => log::warn!("Expected error: {}", e)
+                                                }
+                                            }
                                         }
                                     }
-                                }
-                            }
-                            //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
-                            if (offset + LIMIT) < total_count {
-                                offset += LIMIT;
-                                let members_request = serde_json::json!({
+                                    //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
+                                    if (offset + LIMIT) < total_count {
+                                        offset += LIMIT;
+                                        let members_request = serde_json::json!({
                                     "@type": "getSupergroupMembers",
                                     "supergroup_id": supergroup_id,
                                     "offset": offset,
                                     "limit": LIMIT
-                                });
-                                tdlib.send(members_request.to_string().as_str());
+                                    });
+                                        tdlib.send(members_request.to_string().as_str());
+                                    }
+                                },
+                                Err(e) => log::error!("Error deserializing ChatMembers: {}", e)
                             }
                         }
                     },
