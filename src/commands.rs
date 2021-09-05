@@ -71,7 +71,7 @@ pub fn handle_command(
             let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
-                let (_, unique_id) = dbmedia[1];
+                let (_, unique_id) = dbmedia[2];
                 let url: String = ok!(unique_id).into();
                 vec.push(format!("* {}", url));
                 true

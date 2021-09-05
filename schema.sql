@@ -21,6 +21,7 @@ create table users(
     chat_id sqlite3_int64,
     user_name varchar(250),
     chat_name varchar(250),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, chat_id)
 );
 
