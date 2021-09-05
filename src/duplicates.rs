@@ -126,7 +126,14 @@ fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
     let unknown = String::from("Unknown");
 
     match row {
-        Some(_) => (),
+        Some(_) => {
+            let update = "UPDATE users SET timestamp=CURRENT_TIMESTAMP WHERE user_id=? AND chat_id=?";
+            let mut update_stmt = ok!(connection.prepare(update));
+            ok!(update_stmt.bind(1, user.id));
+            ok!(update_stmt.bind(2, chat.id));
+            let mut update_cursor = update_stmt.cursor();
+            ok!(update_cursor.next());
+        },
         None => {
             log::info!("Storing user...");
             match &chat.kind {
