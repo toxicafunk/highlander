@@ -50,36 +50,39 @@ async fn run() {
                         Some(user) => {
                             // Handle normal messages
                             let member: ChatMember = ok!(message.requester.get_chat_member(message.update.chat.id, user.id).await);
-                            let r = detect_duplicates(&connection, &message, user);
-                            if r.respond {
-                                let mr = message.answer(r.text).await;
-                                match mr {
-                                    Ok(m) => log::info!("Responded: {:?}", m),
-                                    Err(e) => log::error!("Error: {:?}", e)
-                                }
-                            }
-                            if r.action {
-                                let mr = message.delete_message().await;
-                                match mr {
-                                    Ok(m) => log::info!("Deleted message: {:?}", m),
-                                    Err(e) => log::error!("Error: {:?}", e)
-                                }
-                            }
-
-                            // Handle commands
                             let is_admin = match member.status() {
                                 ChatMemberStatus::Administrator => true,
                                 ChatMemberStatus::Creator => true,
                                 _ => false
                             };
-                            if is_admin {
-                                let txt_opt = message.update.text();
-                                //let bot_name = "highlander";
-                                let bot_name = "ramirez";
 
-                                match txt_opt {
-                                    Some(txt) => match Command::parse(txt, bot_name) {
-                                        Ok(command) => {
+                            if !is_admin {
+                                let r = detect_duplicates(&connection, &message, user);
+                                if r.respond {
+                                    let mr = message.answer(r.text).await;
+                                    match mr {
+                                        Ok(m) => log::info!("Responded: {:?}", m),
+                                        Err(e) => log::error!("Error: {:?}", e)
+                                    }
+                                }
+                                if r.action {
+                                    let mr = message.delete_message().await;
+                                    match mr {
+                                        Ok(m) => log::info!("Deleted message: {:?}", m),
+                                        Err(e) => log::error!("Error: {:?}", e)
+                                    }
+                                }
+                            }
+
+                            // Handle commands
+                            let txt_opt = message.update.text();
+                            let bot_name = "highlander";
+                            //let bot_name = "ramirez";
+
+                            match txt_opt {
+                                Some(txt) => match Command::parse(txt, bot_name) {
+                                    Ok(command) => {
+                                        if is_admin {
                                             let cr = handle_command(&connection, command, message.update.chat_id());
                                             match cr {
                                                 Ok(hr) => match hr {
@@ -88,7 +91,13 @@ async fn run() {
                                                         if ans.is_empty() {
                                                             ok!(message.answer("No results found").await);
                                                         } else {
-                                                            ok!(message.answer(ans).await);
+                                                            match message.answer(ans.as_str()).await {
+                                                                Ok(_) => (),
+                                                                Err(e) => {
+                                                                    log::error!("Error {}", e);
+                                                                    log::info!("Tried to send {}", ans)
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                     HResponse::Media(vec) => {
@@ -106,11 +115,13 @@ async fn run() {
                                                 },
                                                 Err(e) => log::error!("Error: {:?}", e)
                                             }
+                                        } else {
+                                            ok!(message.answer("lamentablemente, este comando es solo para usuarios Admin").await);
                                         }
-                                        Err(_) => ()
-                                    },
-                                    None => ()
-                                }
+                                    }
+                                    Err(_) => ()
+                                },
+                                None => ()
                             }
                         }
                         None => ()

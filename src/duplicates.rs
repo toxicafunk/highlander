@@ -215,7 +215,7 @@ fn handle_message(connection: &Connection, acc: Status, sdo: SDO, table: &str) -
             };
             let orig_msg_id = ok!(r[1].as_integer());
             log::info!("{} - {}", orig_chat_id, orig_msg_id);
-            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias. https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
         }
     }
 }

@@ -104,16 +104,19 @@ pub fn handle_command(
             HResponse::URL(vec)
         },
         Command::FindInterUsers => {
+            let exclude_list: Vec<&str> = vec!["1733079574", "162726413", "1575436070", "1042885111"];
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
                 let (_, user_id) = dbmedia[0];
                 let (_, chat_id) = dbmedia[1];
                 let (_, user_name) = dbmedia[2];
-                let (_, chat_name) = dbmedia[3];
-                let (_, cnt) = dbmedia[4];
-                let hit = format!("UserId: {}, GroupId: {}, UserName: {}, GroupName: {}, found in {} groups", ok!(user_id), ok!(chat_id), ok!(user_name), ok!(chat_name), ok!(cnt));
-                vec.push(hit);
+                let (_, cnt) = dbmedia[5];
+                let user_id = ok!(user_id);
+                if !exclude_list.contains(&user_id) {
+                    let hit = format!("UserId: {}, GroupId: {}, UserName: {} found in {} groups", user_id, ok!(chat_id), ok!(user_name), ok!(cnt));
+                    vec.push(hit);
+                }
                 true
             }));
             HResponse::URL(vec)
