@@ -32,6 +32,8 @@ pub enum Command {
     ListUserGroups(i64),
     #[command(description = "find all users on multiple groups")]
     GetChatParticipants,
+    #[command(description = "find all users who've remained active over n days")]
+    FindInactiveUsers(u8),
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -104,7 +106,7 @@ pub fn handle_command(
             HResponse::URL(vec)
         },
         Command::FindInterUsers => {
-            let exclude_list: Vec<&str> = vec!["1733079574", "162726413", "1575436070", "1042885111"];
+            let exclude_list: Vec<&str> = vec!["1733079574", "162726413", "1575436070", "1042885111", "785731637", "208056682"];
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
@@ -140,6 +142,19 @@ pub fn handle_command(
             get_participants(connection, chat_ids);
 
             HResponse::Text(get_participants_reply)
+        },
+        Command::FindInactiveUsers(ndays) => {
+            let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
+            let mut vec = Vec::new();
+            ok!(connection.iterate(select, |dbmedia| {
+                let (_, user_id) = dbmedia[0];
+                let (_, user_name) = dbmedia[1];
+                let (_, timestamp) = dbmedia[2];
+                let hit = format!("UserId: {}, UserName: {}, Last Update: {}", ok!(user_id), ok!(user_name), ok!(timestamp));
+                vec.push(hit);
+                true
+            }));
+            HResponse::URL(vec)
         }
     };
     Ok(r)

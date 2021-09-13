@@ -56,8 +56,8 @@ async fn run() {
                                 _ => false
                             };
 
+                            let r = detect_duplicates(&connection, &message, user);
                             if !is_admin {
-                                let r = detect_duplicates(&connection, &message, user);
                                 if r.respond {
                                     let mr = message.answer(r.text).await;
                                     match mr {

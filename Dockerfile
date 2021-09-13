@@ -18,7 +18,9 @@ RUN CXXFLAGS="-stdlib=libc++" CC=/usr/bin/clang-6.0 CXX=/usr/bin/clang++-6.0 cma
 RUN cmake --build . --target install
 RUN apt install -y pkg-config openssl libcrypto++-dev cargo
 RUN cp -R /src/td/tdlib/* /usr/local
+WORKDIR /tmp
+RUN tar -cvf tdlib_ubuntu.tar /src/td/tdlib/*
 WORKDIR /src
 RUN git clone https://github.com/fewensa/rtdlib.git
 WORKDIR /src/highlander
-CMD cargo build --release
+CMD ls -l /tmp && cargo build --release && mv /tmp/tdlib_ubuntu.tar /src/highlander/target/release

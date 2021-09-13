@@ -39,3 +39,5 @@ select * from urls where timestamp <= date('now', '-4 day');
 
 SELECT * FROM media WHERE chat_id = -1001592783264 GROUP BY msg_id ORDER BY timestamp DESC limit 5;
 SELECT * FROM urls WHERE chat_id = -1001592783264 ORDER BY timestamp DESC limit 5;
+
+SELECT * FROM users WHERE chat_id = -1001592783264 AND timestamp <= date('now', '-4 day')
