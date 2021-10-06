@@ -6,12 +6,15 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-teloxide = { version = "0.4", features = ["auto-send", "macros"] }
+teloxide = { version = "0.5.2", features = ["auto-send", "macros"] }
 # rtdlib = { version = "1.7.*", features = ["sys"] }
 rtdlib = { features = ["sys"], path = "../rtdlib" }
+
 serde_json = "1.0.59"
 log = "0.4.8"
 pretty_env_logger = "0.4.0"
+derive_more = "0.99.16"
+
 tokio = { version =  "1.3.0", features = ["rt-multi-thread", "macros"] }
 tokio-stream = "0.1.3"
 futures = "0.3.16"
@@ -19,4 +22,4 @@ chrono = "0.4"
 
 sqlite = "0.24.0"
 lazy_static = "1.4.0"
-regex = "1"
+regex = "1.5.4"

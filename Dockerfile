@@ -21,6 +21,6 @@ RUN cp -R /src/td/tdlib/* /usr/local
 WORKDIR /tmp
 RUN tar -cvf tdlib_ubuntu.tar /src/td/tdlib/*
 WORKDIR /src
-RUN git clone https://github.com/fewensa/rtdlib.git
+#RUN git clone https://github.com/fewensa/rtdlib.git
 WORKDIR /src/highlander
 CMD ls -l /tmp && cargo build --release && mv /tmp/tdlib_ubuntu.tar /src/highlander/target/release

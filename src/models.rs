@@ -1,15 +1,26 @@
-use teloxide::types::InputMedia;
 use teloxide::types::Chat;
+use teloxide::types::InputMedia;
 
-use std::sync::Arc;
 use std::env;
+use std::sync::Arc;
 
 use sqlite::Connection;
 
+#[derive(Debug, Clone)]
 pub struct Status {
     pub action: bool,
     pub respond: bool,
-    pub text: String
+    pub text: String,
+}
+
+impl Status {
+    pub fn new(status: &Status) -> Self {
+        Self {
+            action: status.action,
+            respond: status.respond,
+            text: status.text.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -18,13 +29,13 @@ pub struct SDO {
     pub msg_id: i32,
     pub file_type: String,
     pub unique_id: String,
-    pub file_id: Option<String>
+    pub file_id: Option<String>,
 }
 
 pub enum HResponse {
     Media(Vec<InputMedia>),
     URL(Vec<String>),
-    Text(String)
+    Text(String),
 }
 
 pub fn create_connection() -> Connection {

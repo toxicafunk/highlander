@@ -1,15 +1,16 @@
-use teloxide::RequestError;
-use teloxide::types::{InputMedia, InputMediaVideo, InputMediaAnimation, InputMediaPhoto, InputMediaAudio, InputMediaDocument, InputFile};
+use teloxide::types::{
+    InputFile, InputMedia, InputMediaAnimation, InputMediaAudio, InputMediaDocument,
+    InputMediaPhoto, InputMediaVideo,
+};
 use teloxide::utils::command::BotCommand;
+use teloxide::RequestError;
 
 use sqlite::Connection;
 
-//use futures::executor::block_on;
-
 use std::env;
 
-use rtdlib::Tdlib;
 use rtdlib::types::*;
+use rtdlib::Tdlib;
 
 use super::models::HResponse;
 
@@ -38,21 +39,67 @@ pub enum Command {
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
     match ftype {
-        "photo" => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
-        "video" => InputMedia::Video(InputMediaVideo { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, width: None, height: None, duration: None, supports_streaming: None }),
-        "audio" => InputMedia::Audio(InputMediaAudio { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, performer: None, title: None, duration: None }),
-        "animation" => InputMedia::Animation(InputMediaAnimation { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, width: None, height: None, duration: None, thumb: None }),
-        "document" => InputMedia::Document(InputMediaDocument { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None, thumb: None, disable_content_type_detection: None }),
-        _ => InputMedia::Photo(InputMediaPhoto { media: InputFile::FileId(ok!(file_id).into()), caption: Some(format!("Part of media {}", ok!(unique_id))), caption_entities: None, parse_mode: None }),
+        "photo" => InputMedia::Photo(InputMediaPhoto {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+        }),
+        "video" => InputMedia::Video(InputMediaVideo {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+            thumb: None,
+            width: None,
+            height: None,
+            duration: None,
+            supports_streaming: None,
+        }),
+        "audio" => InputMedia::Audio(InputMediaAudio {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+            thumb: None,
+            performer: None,
+            title: None,
+            duration: None,
+        }),
+        "animation" => InputMedia::Animation(InputMediaAnimation {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+            width: None,
+            height: None,
+            duration: None,
+            thumb: None,
+        }),
+        "document" => InputMedia::Document(InputMediaDocument {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+            thumb: None,
+            disable_content_type_detection: None,
+        }),
+        _ => InputMedia::Photo(InputMediaPhoto {
+            media: InputFile::FileId(ok!(file_id).into()),
+            caption: Some(format!("Part of media {}", ok!(unique_id))),
+            caption_entities: None,
+            parse_mode: None,
+        }),
     }
 }
 
 pub fn handle_command(
     connection: &Connection,
     command: Command,
-    chat_id: i64,
+    chat_id: i64
 ) -> Result<HResponse, RequestError> {
-    let get_participants_reply = String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
+    let get_participants_reply =
+        String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
         Command::LastMediaStored(num) => {
@@ -68,9 +115,12 @@ pub fn handle_command(
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastUrlStored(num) => {
-            let select = format!("SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};", chat_id, num);
+            let select = format!(
+                "SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};",
+                chat_id, num
+            );
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
                 let (_, unique_id) = dbmedia[2];
@@ -79,7 +129,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::LastDuplicateMedia(num) => {
             let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -88,12 +138,12 @@ pub fn handle_command(
                 let (_, file_type) = dbmedia[2];
                 let (_, file_id) = dbmedia[3];
                 let ftype = ok!(file_type);
-                let im: InputMedia =  prepare_input_media(ftype, file_id, unique_id);
+                let im: InputMedia = prepare_input_media(ftype, file_id, unique_id);
                 vec.push(im);
                 true
             }));
             HResponse::Media(vec)
-        },
+        }
         Command::LastDuplicateUrls(num) => {
             let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
             let mut vec = Vec::new();
@@ -104,9 +154,16 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::FindInterUsers => {
-            let exclude_list: Vec<&str> = vec!["1733079574", "162726413", "1575436070", "1042885111", "785731637", "208056682"];
+            let exclude_list: Vec<&str> = vec![
+                "1733079574",
+                "162726413",
+                "1575436070",
+                "1042885111",
+                "785731637",
+                "208056682",
+            ];
             let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
@@ -116,15 +173,24 @@ pub fn handle_command(
                 let (_, cnt) = dbmedia[5];
                 let user_id = ok!(user_id);
                 if !exclude_list.contains(&user_id) {
-                    let hit = format!("UserId: {}, GroupId: {}, UserName: {} found in {} groups", user_id, ok!(chat_id), ok!(user_name), ok!(cnt));
+                    let hit = format!(
+                        "UserId: {}, GroupId: {}, UserName: {} found in {} groups",
+                        user_id,
+                        ok!(chat_id),
+                        ok!(user_name),
+                        ok!(cnt)
+                    );
                     vec.push(hit);
                 }
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::ListUserGroups(id) => {
-            let select = format!("SELECT chat_id, chat_name FROM users WHERE user_id = {};", id);
+            let select = format!(
+                "SELECT chat_id, chat_name FROM users WHERE user_id = {};",
+                id
+            );
             let mut vec = Vec::new();
             ok!(connection.iterate(select, |dbmedia| {
                 let (_, chat_id) = dbmedia[0];
@@ -134,7 +200,7 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        },
+        }
         Command::GetChatParticipants => {
             log::info!("Connecting to Telegram...");
             let chat_ids = get_chat_ids(connection);
@@ -142,7 +208,7 @@ pub fn handle_command(
             get_participants(connection, chat_ids);
 
             HResponse::Text(get_participants_reply)
-        },
+        }
         Command::FindInactiveUsers(ndays) => {
             let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
             let mut vec = Vec::new();
@@ -150,7 +216,12 @@ pub fn handle_command(
                 let (_, user_id) = dbmedia[0];
                 let (_, user_name) = dbmedia[1];
                 let (_, timestamp) = dbmedia[2];
-                let hit = format!("UserId: {}, UserName: {}, Last Update: {}", ok!(user_id), ok!(user_name), ok!(timestamp));
+                let hit = format!(
+                    "UserId: {}, UserName: {}, Last Update: {}",
+                    ok!(user_id),
+                    ok!(user_name),
+                    ok!(timestamp)
+                );
                 vec.push(hit);
                 true
             }));
@@ -186,12 +257,18 @@ fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
                             break;
                         }
                         if state.authorization_state().is_wait_encryption_key() {
-                            tdlib.send(r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#);
-                            let bot_auth = format!("{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}", token);
+                            tdlib.send(
+                                r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#,
+                            );
+                            let bot_auth = format!(
+                                "{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}",
+                                token
+                            );
                             tdlib.send(bot_auth.as_str());
                         }
                         if state.authorization_state().is_wait_tdlib_parameters() {
-                            let set_parameters = format!("{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
+                            let set_parameters = format!(
+                                "{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
                                     \"api_id\":\"{}\",\
                                     \"api_hash\":\"{}\",\
                                     \"bot_auth_token\":\"{}\",\
@@ -199,7 +276,9 @@ fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
                                     \"system_language_code\":\"en\",\
                                     \"device_model\":\"Desktop\",\
                                     \"application_version\":\"1.0.0\"\
-                                    }} }}", api_id, api_hash, token);
+                                    }} }}",
+                                api_id, api_hash, token
+                            );
                             log::info!("{}", set_parameters);
                             tdlib.send(set_parameters.as_str());
                         }
@@ -216,10 +295,10 @@ fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
                             log::info!("Wait registration");
                         }
                     }
-                    Err(_) => ()
+                    Err(_) => (),
                 }
             }
-            None => ()
+            None => (),
         }
     }
 
@@ -228,7 +307,7 @@ fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
         log::info!("chat_id: {}", id);
         let chat_request = format!("{{\"@type\":\"getChat\",\"chat_id\":\"{}\" }}", id);
         tdlib.send(chat_request.as_str());
-        process_chat(connection, &tdlib,id);
+        process_chat(connection, &tdlib, id);
     }
 
     log::info!("No more updates");
@@ -250,7 +329,9 @@ fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
                 match serde_json::from_str::<serde_json::Value>(&response[..]) {
                     Ok(v) => {
                         if v["@type"] == "chat" {
-                            let chat: Chat = ok!(serde_json::from_value(v.clone()));
+                            let chat_json = v.clone();
+                            log::info!("Chat: {}", chat_json);
+                            let chat: Chat = ok!(serde_json::from_value(chat_json));
                             let chat = chat.clone();
                             if chat_id == chat.id() {
                                 chat_name = chat.title().clone();
@@ -267,53 +348,73 @@ fn process_chat(connection: &Connection, tdlib: &Tdlib, chat_id: i64) {
                             }
                         }
                         if v["@type"] == "chatMembers" {
-                            match  serde_json::from_value::<ChatMembers>(v.clone()) {
+                            match serde_json::from_value::<ChatMembers>(v.clone()) {
                                 Ok(members) => {
                                     let total_count = members.total_count();
                                     for member in members.members() {
                                         match member.member_id() {
-                                            MessageSender::User(member) =>  {
+                                            MessageSender::User(member) => {
                                                 log::info!("Member: {}", member.user_id());
-                                                let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
-                                                let mut insert_stmt = ok!(connection.prepare(insert));
-                                                ok!(insert_stmt.bind(1, member.user_id()));
-                                                ok!(insert_stmt.bind(2, chat_id));
-                                                ok!(insert_stmt.bind(3, unknown));
-                                                ok!(insert_stmt.bind(4, chat_name.as_str()));
+                                                let select = "SELECT user_id, chat_id FROM users WHERE user_id = ? AND chat_id = ?";
+                                                let mut select_stmt =
+                                                    ok!(connection.prepare(select));
+                                                ok!(select_stmt.bind(1, member.user_id()));
+                                                ok!(select_stmt.bind(2, chat_id));
+                                                let mut select_cursor = select_stmt.cursor();
+                                                let row = ok!(select_cursor.next());
+                                                match row {
+                                                    None => {
+                                                        let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
+                                                        let mut insert_stmt =
+                                                            ok!(connection.prepare(insert));
+                                                        ok!(insert_stmt.bind(1, member.user_id()));
+                                                        ok!(insert_stmt.bind(2, chat_id));
+                                                        ok!(insert_stmt.bind(3, unknown));
+                                                        ok!(insert_stmt.bind(4, chat_name.as_str()));
 
-                                                let mut cursor = insert_stmt.cursor();
-                                                match cursor.next() {
-                                                    Ok(_) => (),
-                                                    Err(e) => log::warn!("Expected error: {}", e)
+                                                        let mut cursor = insert_stmt.cursor();
+                                                        match cursor.next() {
+                                                            Ok(_) => (),
+                                                            Err(e) => {
+                                                                log::warn!("Expected error: {}", e)
+                                                            }
+                                                        }
+                                                    }
+                                                    Some(_) => (),
                                                 }
-                                            },
-                                            MessageSender::Chat(chat) => log::warn!("Ignore {}", chat.chat_id()),
+                                            }
+                                            MessageSender::Chat(chat) => {
+                                                log::warn!("Ignore {}", chat.chat_id())
+                                            }
                                             MessageSender::_Default(_) => {}
                                         }
                                     }
-                                    //let members_request = format!("{{ \"@type\":\"getSupergroupMembers\",\"supergroup_id\":\"{}\",\"offset\":\"{}\",\"limit\":\"200\" }}", supergroup.supergroup_id(), offset);
                                     if (offset + LIMIT) < total_count {
                                         offset += LIMIT;
                                         let members_request = serde_json::json!({
-                                    "@type": "getSupergroupMembers",
-                                    "supergroup_id": supergroup_id,
-                                    "offset": offset,
-                                    "limit": LIMIT
-                                    });
+                                        "@type": "getSupergroupMembers",
+                                        "supergroup_id": supergroup_id,
+                                        "offset": offset,
+                                        "limit": LIMIT
+                                        });
                                         tdlib.send(members_request.to_string().as_str());
                                     }
-                                },
-                                Err(e) => log::error!("Error deserializing ChatMembers: {}", e)
+                                }
+                                Err(e) => log::error!("Error deserializing ChatMembers: {}", e),
                             }
                         }
-                    },
-                    Err(e) => log::error!("Error: {}", e)
+                    }
+                    Err(e) => log::error!("Error: {}", e),
                 }
-            },
-            None => if i <= 3 {
-                i += 1;
-                log::info!("{} timeout", i)
-            } else { break }
+            }
+            None => {
+                if i <= 3 {
+                    i += 1;
+                    log::info!("{} timeout", i)
+                } else {
+                    break;
+                }
+            }
         }
     }
 }
