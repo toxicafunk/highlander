@@ -191,128 +191,141 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
 
 fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
     let select = "SELECT user_name, chat_name FROM users WHERE user_id = ? AND chat_id = ?";
-    let mut select_stmt = ok!(connection.prepare(select));
-    ok!(select_stmt.bind(1, user.id));
-    ok!(select_stmt.bind(2, chat.id));
-    let mut select_cursor = select_stmt.cursor();
-    let row = ok!(select_cursor.next());
-    let unknown = String::from("Unknown");
+    match connection.prepare(select) {
+        Err(e) => log::error!("Store user: {}", e),
+        Ok(mut select_stmt) => {
+            ok!(select_stmt.bind(1, user.id));
+            ok!(select_stmt.bind(2, chat.id));
+            let mut select_cursor = select_stmt.cursor();
+            let row = ok!(select_cursor.next());
+            let unknown = String::from("Unknown");
 
-    match row {
-        Some(_) => {
-            let update =
-                "UPDATE users SET timestamp=CURRENT_TIMESTAMP WHERE user_id=? AND chat_id=?";
-            let mut update_stmt = ok!(connection.prepare(update));
-            ok!(update_stmt.bind(1, user.id));
-            ok!(update_stmt.bind(2, chat.id));
-            let mut update_cursor = update_stmt.cursor();
-            ok!(update_cursor.next());
-        }
-        None => {
-            log::info!("Storing user...");
-            match &chat.kind {
-                ChatKind::Public(public) => {
-                    let chat_name = public.title.as_ref().unwrap_or(&unknown) as &str;
-                    let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
-                    let mut insert_stmt = ok!(connection.prepare(insert));
-                    ok!(insert_stmt.bind(1, user.id));
-                    ok!(insert_stmt.bind(2, chat.id));
-                    ok!(insert_stmt.bind(
-                        3,
-                        user.username
-                            .as_ref()
-                            .unwrap_or(&user.first_name.to_string())
-                            as &str
-                    ));
-                    ok!(insert_stmt.bind(4, &chat_name as &str));
-
-                    let mut cursor = insert_stmt.cursor();
-                    ok!(cursor.next());
+            match row {
+                Some(_) => {
+                    let update =
+                        "UPDATE users SET timestamp=CURRENT_TIMESTAMP WHERE user_id=? AND chat_id=?";
+                    let mut update_stmt = ok!(connection.prepare(update));
+                    ok!(update_stmt.bind(1, user.id));
+                    ok!(update_stmt.bind(2, chat.id));
+                    let mut update_cursor = update_stmt.cursor();
+                    ok!(update_cursor.next());
                 }
-                ChatKind::Private(_) => (), //private.username.as_ref().unwrap_or(&unknown)
-            };
+                None => {
+                    log::info!("Storing user...");
+                    match &chat.kind {
+                        ChatKind::Public(public) => {
+                            let chat_name = public.title.as_ref().unwrap_or(&unknown) as &str;
+                            let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
+                            let mut insert_stmt = ok!(connection.prepare(insert));
+                            ok!(insert_stmt.bind(1, user.id));
+                            ok!(insert_stmt.bind(2, chat.id));
+                            ok!(insert_stmt.bind(
+                                3,
+                                user.username
+                                    .as_ref()
+                                    .unwrap_or(&user.first_name.to_string())
+                                    as &str
+                            ));
+                            ok!(insert_stmt.bind(4, &chat_name as &str));
+
+                            let mut cursor = insert_stmt.cursor();
+                            ok!(cursor.next());
+                        }
+                        ChatKind::Private(_) => (), //private.username.as_ref().unwrap_or(&unknown)
+                    };
+                }
+            }
         }
     }
 }
+
 fn handle_message(connection: &Connection, acc: &Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
     let select = format!(
         "SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?",
         table
     );
-    let mut select_stmt = ok!(connection.prepare(select));
-    ok!(select_stmt.bind(1, sdo.chat.id));
-    ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
-    let mut select_cursor = select_stmt.cursor();
-    let row = ok!(select_cursor.next());
 
-    let insert = if is_media {
-        format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
-    } else {
-        format!(
-            "INSERT INTO {} (chat_id, msg_id, unique_id) VALUES (?, ?, ?)",
-            table
-        )
-    };
-
-    log::info!("table: {}, SDO: {:?}", table, sdo);
-    match row {
-        None => {
-            let mut insert_stmt = ok!(connection.prepare(insert));
-            if is_media {
-                ok!(insert_stmt.bind(1, sdo.chat.id));
-                ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-                ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-                ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
-                ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
-            } else {
-                ok!(insert_stmt.bind(1, sdo.chat.id));
-                ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-                ok!(insert_stmt.bind(3, sdo.unique_id.as_str()));
-            };
-            let mut cursor = insert_stmt.cursor();
-            ok!(cursor.next());
-            log::info!(
-                "Stored {} - {} - {} - {}",
-                sdo.chat.id,
-                sdo.msg_id,
-                sdo.unique_id,
-                acc.text
-            );
+    match connection.prepare(select) {
+        Err(e) => {
+            log::error!("Handle message: {}", e);
             Status::new(acc)
-        }
-        Some(r) => {
-            log::info!(
-                "Duplicate: {} - {} - {}",
-                sdo.chat.id,
-                sdo.unique_id,
-                acc.text
-            );
-            log::info!("{:?}", r);
-            let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id, msg_id) VALUES (?, ?, ?, ?, ?)";
-            let mut insert_stmt = ok!(connection.prepare(insert));
-            ok!(insert_stmt.bind(1, sdo.chat.id));
-            ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
-            ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-            ok!(insert_stmt.bind(4, sdo.file_id.unwrap_or(String::from("")).as_str()));
-            ok!(insert_stmt.bind(5, f64::from(sdo.msg_id)));
+        },
+        Ok(mut select_stmt) => {
+            ok!(select_stmt.bind(1, sdo.chat.id));
+            ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
+            let mut select_cursor = select_stmt.cursor();
+            let row = ok!(select_cursor.next());
 
-            let mut cursor = insert_stmt.cursor();
-            match cursor.next() {
-                Ok(_) => (),
-                Err(_) => (),
+            let insert = if is_media {
+                format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
+            } else {
+                format!(
+                    "INSERT INTO {} (chat_id, msg_id, unique_id) VALUES (?, ?, ?)",
+                    table
+                )
             };
 
-            let orig_chat_id = match r[0].as_integer() {
-                Some(c) => match c.to_string().strip_prefix("-100") {
-                    Some(s) => s.parse::<i64>().unwrap_or(c),
-                    None => 0,
-                },
-                None => 0,
-            };
-            let orig_msg_id = ok!(r[1].as_integer());
-            log::info!("{} - {}", orig_chat_id, orig_msg_id);
-            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+            log::info!("table: {}, SDO: {:?}", table, sdo);
+            match row {
+                None => {
+                    let mut insert_stmt = ok!(connection.prepare(insert));
+                    if is_media {
+                        ok!(insert_stmt.bind(1, sdo.chat.id));
+                        ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
+                        ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
+                        ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
+                        ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
+                    } else {
+                        ok!(insert_stmt.bind(1, sdo.chat.id));
+                        ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
+                        ok!(insert_stmt.bind(3, sdo.unique_id.as_str()));
+                    };
+                    let mut cursor = insert_stmt.cursor();
+                    ok!(cursor.next());
+                    log::info!(
+                        "Stored {} - {} - {} - {}",
+                        sdo.chat.id,
+                        sdo.msg_id,
+                        sdo.unique_id,
+                        acc.text
+                    );
+                    Status::new(acc)
+                }
+                Some(r) => {
+                    log::info!(
+                        "Duplicate: {} - {} - {}",
+                        sdo.chat.id,
+                        sdo.unique_id,
+                        acc.text
+                    );
+                    log::info!("{:?}", r);
+                    let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id, msg_id) VALUES (?, ?, ?, ?, ?)";
+                    let mut insert_stmt = ok!(connection.prepare(insert));
+                    ok!(insert_stmt.bind(1, sdo.chat.id));
+                    ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
+                    ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
+                    ok!(insert_stmt.bind(4, sdo.file_id.unwrap_or(String::from("")).as_str()));
+                    ok!(insert_stmt.bind(5, f64::from(sdo.msg_id)));
+
+                    let mut cursor = insert_stmt.cursor();
+                    match cursor.next() {
+                        Ok(_) => (),
+                        Err(_) => (),
+                    };
+
+                    let orig_chat_id = match r[0].as_integer() {
+                        Some(c) => match c.to_string().strip_prefix("-100") {
+                            Some(s) => s.parse::<i64>().unwrap_or(c),
+                            None => 0,
+                        },
+                        None => 0,
+                    };
+                    let orig_msg_id = ok!(r[1].as_integer());
+                    log::info!("{} - {}", orig_chat_id, orig_msg_id);
+                    Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+                }
+            }
         }
     }
 }
