@@ -31,7 +31,16 @@ create table duplicates(
     file_type varchar(9) not null,
     file_id varchar(90) null,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    msg_id sqlite3_int32,
     PRIMARY KEY (chat_id, unique_id)
+);
+
+create table mappings(
+    api_id sqlite3_int64,
+    chat_id sqlite3_int64,
+    unique_id varchar(16) not null,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (api_id, chat_id)
 );
 
 select * from media where timestamp <= date('now', '-4 day');
@@ -41,3 +50,5 @@ SELECT * FROM media WHERE chat_id = -1001592783264 GROUP BY msg_id ORDER BY time
 SELECT * FROM urls WHERE chat_id = -1001592783264 ORDER BY timestamp DESC limit 5;
 
 SELECT * FROM users WHERE chat_id = -1001592783264 AND timestamp <= date('now', '-4 day')
+
+ALTER TABLE duplicates ADD msg_id sqlite3_int32;

@@ -9,7 +9,7 @@ use teloxide::types::{Chat, ChatKind, MediaKind, MessageKind, User};
 use super::models::*;
 use std::sync::Arc;
 
-fn extract_last250(text: &str) -> &str {
+pub fn extract_last250(text: &str) -> &str {
     let l = text.len();
     let i = if l > 250 { l - 250 } else { 0 };
     text.get(i..l).unwrap_or("")
@@ -20,6 +20,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
+    log::info!("Message received: {:?}", message);
 
     store_user(connection, user, chat.clone());
 
@@ -288,12 +289,13 @@ fn handle_message(connection: &Connection, acc: &Status, sdo: SDO, table: &str) 
                 acc.text
             );
             log::info!("{:?}", r);
-            let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id) VALUES (?, ?, ?, ?)";
+            let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id, msg_id) VALUES (?, ?, ?, ?, ?)";
             let mut insert_stmt = ok!(connection.prepare(insert));
             ok!(insert_stmt.bind(1, sdo.chat.id));
             ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
             ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
             ok!(insert_stmt.bind(4, sdo.file_id.unwrap_or(String::from("")).as_str()));
+            ok!(insert_stmt.bind(5, f64::from(sdo.msg_id)));
 
             let mut cursor = insert_stmt.cursor();
             match cursor.next() {

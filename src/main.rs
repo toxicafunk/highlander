@@ -17,31 +17,13 @@ use chrono::Local;
 use log::LevelFilter;
 use pretty_env_logger::env_logger::Builder;
 
-use highlander::commands::*;
-use highlander::duplicates::detect_duplicates;
-use highlander::models::{create_connection, HResponse};
-
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
 
-async fn handle_deletes(tdlib: Tdlib) {
-    loop {
-        match tdlib.receive(5.0) {
-            Some(response) => {
-                //log::info!("Listener Response: {}", response);
-                match serde_json::from_str::<serde_json::Value>(&response[..]) {
-                    Ok(v) => {
-                        if v["@type"] == "updateDeleteMessages" {
-                            log::info!("Listener Value: {}", v);
-                        }
-                    }
-                    Err(e) => log::error!("Error: {}", e),
-                }
-            }
-            None => ()
-        }
-    }
-}
+use highlander::commands::*;
+use highlander::api_listener::*;
+use highlander::duplicates::detect_duplicates;
+use highlander::models::{create_connection, HResponse};
 
 #[tokio::main]
 async fn main() {
@@ -135,7 +117,7 @@ async fn run() {
         }
     }
 
-    spawn(handle_deletes(tdlib));
+    spawn(tgram_listener(tdlib));
 
     Dispatcher::new(bot)
         .messages_handler(|rx: DispatcherHandlerRx<AutoSend<Bot>, Message>| {
@@ -181,8 +163,8 @@ async fn run() {
 
                         // Handle commands
                         let txt_opt = message.text();
-                        //let bot_name = "highlander";
-                        let bot_name = "ramirez";
+                        let bot_name = "highlander";
+                        //let bot_name = "ramirez";
 
                         match txt_opt {
                             Some(txt) => match Command::parse(txt, bot_name) {
