@@ -1,35 +1,15 @@
 use rtdlib::types::{MessageContent, TextEntityType, UpdateDeleteMessages, UpdateNewMessage};
 use rtdlib::Tdlib;
 
-use sqlite::Connection;
-
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use super::models::create_connection;
+use super::repository::Repository;
+use super::sqlite_repo::SQLiteRepo;
 use super::duplicates::extract_last250;
 
-const INSERT: &str = "INSERT INTO mappings (api_id, chat_id, unique_id) VALUES (?, ?, ?)";
-
-fn insert_mapping(connection: &Connection, id: i64, chat_id: i64, unique_id: &str) {
-    let mut insert_stmt = ok!(connection.prepare(INSERT));
-
-    ok!(insert_stmt.bind(1, id));
-    ok!(insert_stmt.bind(2, chat_id));
-    ok!(insert_stmt.bind(3, unique_id));
-
-    let mut cursor = insert_stmt.cursor();
-    match cursor.next() {
-        Err(e) => log::error!("{}", e),
-        Ok(r) => match r {
-            None => (),
-            Some(e) => log::error!("{:?}", e)
-        }
-    }
-}
-
 pub async fn tgram_listener(tdlib: Tdlib) -> () {
-    let connection: Connection = create_connection();
+    let db: SQLiteRepo = Repository::init();
     loop {
         match tdlib.receive(5.0) {
             Some(response) => {
@@ -59,7 +39,7 @@ pub async fn tgram_listener(tdlib: Tdlib) -> () {
                                                 RE.captures_iter(txt).for_each(|cap| {
                                                     let url = cap.get(0).unwrap().as_str();
                                                     let unique_id = extract_last250(url);
-                                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                                    db.insert_mapping(id, chat_id, unique_id);
                                                 });
                                             },
                                             _ => ()
@@ -69,27 +49,27 @@ pub async fn tgram_listener(tdlib: Tdlib) -> () {
                                 },
                                 MessageContent::MessageAudio(message_audio) => {
                                     let unique_id = message_audio.audio().audio().remote().unique_id();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 },
                                 MessageContent::MessageDocument(message_document) => {
                                     let unique_id = message_document.document().document().remote().unique_id();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 },
                                 MessageContent::MessagePhoto(message_photo) => message_photo.photo().sizes().iter().for_each(|size| {
                                     let unique_id = size.photo().remote().unique_id().as_str();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 }),
                                 MessageContent::MessageVideo(message_video) => {
                                     let unique_id = message_video.video().video().remote().unique_id();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 },
                                 MessageContent::MessageVideoNote(message_video_note) => {
                                     let unique_id = message_video_note.video_note().video().remote().unique_id();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 },
                                 MessageContent::MessageVoiceNote(message_voice_note) => {
                                     let unique_id = message_voice_note.voice_note().voice().remote().unique_id();
-                                    insert_mapping(&connection, id, chat_id, unique_id)
+                                    db.insert_mapping(id, chat_id, unique_id);
                                 },
                                 _ => ()
                             }
@@ -99,34 +79,7 @@ pub async fn tgram_listener(tdlib: Tdlib) -> () {
                             log::info!("Delete Listener Value: {}", v);
                             let update_delete_message = v.clone();
                             let deleted_messages: UpdateDeleteMessages = ok!(serde_json::from_value(update_delete_message));
-                            let chat_id = deleted_messages.chat_id();
-                            for msg_id in deleted_messages.message_ids() {
-                                let delete_media = "DELETE FROM media WHERE unique_id = (SELECT unique_id FROM mappings WHERE api_id = ? and chat_id = ?)";
-                                let mut delete_media_stmt = ok!(connection.prepare(delete_media));
-                                ok!(delete_media_stmt.bind(1, *msg_id));
-                                ok!(delete_media_stmt.bind(2, chat_id));
-                                let mut delete_media_cursor = delete_media_stmt.cursor();
-                                match delete_media_cursor.next() {
-                                    Err(e) => log::error!("{}", e),
-                                    Ok(r) => match r {
-                                        None => (),
-                                        Some(_) => log::info!("Delete media message {} on chat {}", msg_id, chat_id)
-                                    }
-                                }
-
-                                let delete_urls = "DELETE FROM urls WHERE unique_id = (SELECT unique_id FROM mappings WHERE api_id = ? and chat_id = ?)";
-                                let mut delete_urls_stmt = ok!(connection.prepare(delete_urls));
-                                ok!(delete_urls_stmt.bind(1, *msg_id));
-                                ok!(delete_urls_stmt.bind(2, chat_id));
-                                let mut delete_urls_cursor = delete_urls_stmt.cursor();
-                                match delete_urls_cursor.next() {
-                                    Err(e) => log::error!("{}", e),
-                                    Ok(r) => match r {
-                                        None => (),
-                                        Some(_) => log::info!("Delete url message {} on chat {}", msg_id, chat_id)
-                                    }
-                                }
-                            }
+                            db.delete_item(deleted_messages)
                         }
                     }
                     Err(e) => log::error!("Error: {}", e),

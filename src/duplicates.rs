@@ -1,13 +1,14 @@
-use sqlite::Connection;
-
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use teloxide::prelude::*;
-use teloxide::types::{Chat, ChatKind, MediaKind, MessageKind, User};
-
-use super::models::*;
 use std::sync::Arc;
+
+use teloxide::prelude::*;
+use teloxide::types::{Chat, MediaKind, MessageKind, User};
+
+use crate::repository::Repository;
+use super::sqlite_repo::SQLiteRepo;
+use crate::models::*;
 
 pub fn extract_last250(text: &str) -> &str {
     let l = text.len();
@@ -15,14 +16,14 @@ pub fn extract_last250(text: &str) -> &str {
     text.get(i..l).unwrap_or("")
 }
 
-pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User) -> Status {
-    //let update: &Message = &message.update;
+pub fn detect_duplicates(message: &Message, user: &User) -> Status {
+    let db: SQLiteRepo = Repository::init();
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
     log::info!("Message received: {:?}", message);
 
-    store_user(connection, user, chat.clone());
+    store_user(db.clone(), user, chat.clone());
 
     let success = "Media will be unique for 5 days";
     let mut status = Status {
@@ -51,7 +52,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                         unique_id: unique_id,
                         file_id: None,
                     };
-                    let new_status = handle_message(&connection, &status, sdo, "urls");
+                    let new_status = handle_message(db.clone(), &status, sdo, "urls");
                     statuses.push((new_status, url));
                 });
 
@@ -92,7 +93,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                 status.text = caption.into();
                 let chat = chat.clone();
                 let sdo = SDO { chat, msg_id, file_type: String::from("animation"), unique_id: file_unique_id, file_id: Some(file_id) };
-                handle_message(&connection, status, sdo, "media")
+                handle_message(db, status, sdo, "media")
             },*/
             MediaKind::Audio(audio) => {
                 let file_unique_id = audio.audio.file_unique_id;
@@ -108,7 +109,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                     unique_id: file_unique_id,
                     file_id: Some(file_id),
                 };
-                handle_message(&connection, &status, sdo, "media")
+                handle_message(db, &status, sdo, "media")
             }
             MediaKind::Document(document) => {
                 let file_unique_id = document.document.file_unique_id;
@@ -124,7 +125,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                     unique_id: file_unique_id,
                     file_id: Some(file_id),
                 };
-                handle_message(&connection, &status, sdo, "media")
+                handle_message(db, &status, sdo, "media")
             }
             MediaKind::Photo(photo) => {
                 log::info!("Photo: {:?}", message);
@@ -141,7 +142,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                         unique_id: file_unique_id.into(),
                         file_id: Some(file_id.into()),
                     };
-                    handle_message(&connection, &acc, sdo, "media")
+                    handle_message(db.clone(), &acc, sdo, "media")
                 })
             }
             MediaKind::Video(video) => {
@@ -158,7 +159,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                     unique_id: file_unique_id,
                     file_id: Some(file_id),
                 };
-                handle_message(&connection, &status, sdo, "media")
+                handle_message(db, &status, sdo, "media")
             }
             MediaKind::Voice(voice) => {
                 let file_unique_id = voice.voice.file_unique_id;
@@ -174,7 +175,7 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
                     unique_id: file_unique_id,
                     file_id: Some(file_id),
                 };
-                handle_message(&connection, &status, sdo, "media")
+                handle_message(db, &status, sdo, "media")
             }
             _ => {
                 log::info!("Other attachment");
@@ -189,144 +190,34 @@ pub fn detect_duplicates(connection: &Connection, message: &Message, user: &User
     r
 }
 
-fn store_user(connection: &Connection, user: &User, chat: Arc<Chat>) {
-    let select = "SELECT user_name, chat_name FROM users WHERE user_id = ? AND chat_id = ?";
-    match connection.prepare(select) {
-        Err(e) => log::error!("Store user: {}", e),
-        Ok(mut select_stmt) => {
-            ok!(select_stmt.bind(1, user.id));
-            ok!(select_stmt.bind(2, chat.id));
-            let mut select_cursor = select_stmt.cursor();
-            let row = ok!(select_cursor.next());
-            let unknown = String::from("Unknown");
-
-            match row {
-                Some(_) => {
-                    let update =
-                        "UPDATE users SET timestamp=CURRENT_TIMESTAMP WHERE user_id=? AND chat_id=?";
-                    let mut update_stmt = ok!(connection.prepare(update));
-                    ok!(update_stmt.bind(1, user.id));
-                    ok!(update_stmt.bind(2, chat.id));
-                    let mut update_cursor = update_stmt.cursor();
-                    ok!(update_cursor.next());
-                }
-                None => {
-                    log::info!("Storing user...");
-                    match &chat.kind {
-                        ChatKind::Public(public) => {
-                            let chat_name = public.title.as_ref().unwrap_or(&unknown) as &str;
-                            let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
-                            let mut insert_stmt = ok!(connection.prepare(insert));
-                            ok!(insert_stmt.bind(1, user.id));
-                            ok!(insert_stmt.bind(2, chat.id));
-                            ok!(insert_stmt.bind(
-                                3,
-                                user.username
-                                    .as_ref()
-                                    .unwrap_or(&user.first_name.to_string())
-                                    as &str
-                            ));
-                            ok!(insert_stmt.bind(4, &chat_name as &str));
-
-                            let mut cursor = insert_stmt.cursor();
-                            ok!(cursor.next());
-                        }
-                        ChatKind::Private(_) => (), //private.username.as_ref().unwrap_or(&unknown)
-                    };
-                }
-            }
-        }
+fn store_user(db: SQLiteRepo, user: &User, chat: Arc<Chat>) -> bool {
+    let chat = chat.clone();
+    if db.chat_user_exists(user, chat.clone()) {
+        db.update_user_timestamp(user, chat)
+    } else  {
+        db.insert_user(user, chat)
     }
 }
 
-fn handle_message(connection: &Connection, acc: &Status, sdo: SDO, table: &str) -> Status {
+fn handle_message(db: SQLiteRepo, acc: &Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
-    let select = format!(
-        "SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?",
-        table
-    );
-
-    match connection.prepare(select) {
-        Err(e) => {
-            log::error!("Handle message: {}", e);
-            Status::new(acc)
-        },
-        Ok(mut select_stmt) => {
-            ok!(select_stmt.bind(1, sdo.chat.id));
-            ok!(select_stmt.bind(2, sdo.unique_id.as_str()));
-            let mut select_cursor = select_stmt.cursor();
-            let row = ok!(select_cursor.next());
-
-            let insert = if is_media {
-                format!("INSERT INTO {} (chat_id, msg_id, file_type, unique_id, file_id) VALUES (?, ?, ?, ?, ?)", table)
-            } else {
-                format!(
-                    "INSERT INTO {} (chat_id, msg_id, unique_id) VALUES (?, ?, ?)",
-                    table
-                )
-            };
-
-            log::info!("table: {}, SDO: {:?}", table, sdo);
-            match row {
-                None => {
-                    let mut insert_stmt = ok!(connection.prepare(insert));
-                    if is_media {
-                        ok!(insert_stmt.bind(1, sdo.chat.id));
-                        ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-                        ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-                        ok!(insert_stmt.bind(4, sdo.unique_id.as_str()));
-                        ok!(insert_stmt.bind(5, ok!(sdo.file_id).as_str()));
-                    } else {
-                        ok!(insert_stmt.bind(1, sdo.chat.id));
-                        ok!(insert_stmt.bind(2, f64::from(sdo.msg_id)));
-                        ok!(insert_stmt.bind(3, sdo.unique_id.as_str()));
-                    };
-                    let mut cursor = insert_stmt.cursor();
-                    ok!(cursor.next());
-                    log::info!(
-                        "Stored {} - {} - {} - {}",
-                        sdo.chat.id,
-                        sdo.msg_id,
-                        sdo.unique_id,
-                        acc.text
-                    );
-                    Status::new(acc)
-                }
-                Some(r) => {
-                    log::info!(
-                        "Duplicate: {} - {} - {}",
-                        sdo.chat.id,
-                        sdo.unique_id,
-                        acc.text
-                    );
-                    log::info!("{:?}", r);
-                    let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id, msg_id) VALUES (?, ?, ?, ?, ?)";
-                    let mut insert_stmt = ok!(connection.prepare(insert));
-                    ok!(insert_stmt.bind(1, sdo.chat.id));
-                    ok!(insert_stmt.bind(2, sdo.unique_id.as_str()));
-                    ok!(insert_stmt.bind(3, sdo.file_type.as_str()));
-                    ok!(insert_stmt.bind(4, sdo.file_id.unwrap_or(String::from("")).as_str()));
-                    ok!(insert_stmt.bind(5, f64::from(sdo.msg_id)));
-
-                    let mut cursor = insert_stmt.cursor();
-                    match cursor.next() {
-                        Ok(_) => (),
-                        Err(_) => (),
-                    };
-
-                    let orig_chat_id = match r[0].as_integer() {
-                        Some(c) => match c.to_string().strip_prefix("-100") {
-                            Some(s) => s.parse::<i64>().unwrap_or(c),
-                            None => 0,
-                        },
-                        None => 0,
-                    };
-                    let orig_msg_id = ok!(r[1].as_integer());
-                    log::info!("{} - {}", orig_chat_id, orig_msg_id);
-                    Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
-                }
-            }
-        }
+    let existing_item = db.item_exists(sdo.clone(), is_media);
+    log::info!("table: {}, SDO: {:?}", table, sdo);
+    if existing_item.is_empty() {
+        db.insert_item(sdo, is_media);
+        Status::new(acc)
+    } else  {
+            log::info!("{:?}", existing_item );
+            let orig_chat_id = match existing_item[0].as_integer() {
+                Some(c) => match c.to_string().strip_prefix("-100") {
+                    Some(s) => s.parse::<i64>().unwrap_or(c),
+                    None => 0,
+                },
+                None => 0,
+           };
+           let orig_msg_id = ok!(existing_item[1].as_integer());
+           log::info!("{} - {}", orig_chat_id, orig_msg_id);
+           Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
     }
 }
 

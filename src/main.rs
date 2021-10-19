@@ -3,7 +3,7 @@ mod macros;
 
 use teloxide::prelude::*;
 use teloxide::types::{ChatMember, ChatMemberStatus};
-use teloxide::utils::command::BotCommand;
+//use teloxide::utils::command::BotCommand;
 
 use tokio::spawn;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -20,10 +20,10 @@ use pretty_env_logger::env_logger::Builder;
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
 
-use highlander::commands::*;
+//use highlander::commands::*;
 use highlander::api_listener::*;
 use highlander::duplicates::detect_duplicates;
-use highlander::models::{create_connection, HResponse};
+//use highlander::models::HResponse;
 
 #[tokio::main]
 async fn main() {
@@ -130,7 +130,7 @@ async fn run() {
                     Err(_) => false,
                 };
 
-                let connection = create_connection();
+                //let connection = create_connection();
                 let message: &Message = &cx.update;
 
                 match message.from() {
@@ -143,7 +143,7 @@ async fn run() {
                             _ => false
                         };
 
-                        let status = detect_duplicates(&connection, &message, user);
+                        let status = detect_duplicates(&message, user);
                         if is_test_mode || !is_admin {
                             if status.respond {
                                 let mr = cx.answer(status.text).await;
@@ -162,7 +162,7 @@ async fn run() {
                         }
 
                         // Handle commands
-                        let txt_opt = message.text();
+                        /*let txt_opt = message.text();
                         let bot_name = "highlander";
                         //let bot_name = "ramirez";
 
@@ -170,7 +170,7 @@ async fn run() {
                             Some(txt) => match Command::parse(txt, bot_name) {
                                 Ok(command) => {
                                     if is_admin {
-                                        let cr = handle_command(&connection, command, message.chat_id());
+                                        let cr = handle_command(db, command, message.chat_id());
                                         match cr {
                                             Ok(hr) => match hr {
                                                 HResponse::URL(urls) => {
@@ -209,7 +209,7 @@ async fn run() {
                                 Err(_) => ()
                             },
                             None => ()
-                        }
+                        }*/
                     }
                     None => ()
                 }

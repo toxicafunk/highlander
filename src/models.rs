@@ -1,10 +1,9 @@
 use teloxide::types::Chat;
 use teloxide::types::InputMedia;
 
-use std::env;
 use std::sync::Arc;
 
-use sqlite::Connection;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone)]
 pub struct Status {
@@ -23,7 +22,7 @@ impl Status {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SDO {
     pub chat: Arc<Chat>,
     pub msg_id: i32,
@@ -38,12 +37,36 @@ pub enum HResponse {
     Text(String),
 }
 
-pub fn create_connection() -> Connection {
-    let db_path = match env::var("HIGHLANDER_DB_PATH") {
-        Ok(path) => path,
-        Err(_) => String::from("."),
-    };
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Media {
+    pub unique_id: String,
+    pub chat_id: i64,
+    pub msg_id: i32,
+    pub file_type: String,
+    pub file_id: String,
+    pub timestamp: i64
+}
 
-    let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
-    connection
+#[derive(Serialize, Deserialize, Debug)]
+pub struct User {
+    pub user_id: i64,
+    pub chat_id: i64,
+    pub user_name: String,
+    pub chat_name: String,
+    pub timestamp: i64
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Mapping {
+    pub unique_id: String,
+    pub chat_id: i64,
+    pub api_id: i64,
+    pub timestamp: i64
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ColFam {
+    MediaCF(Media),
+    UserCF(User),
+    MappingCF(Mapping)
 }
