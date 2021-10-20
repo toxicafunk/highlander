@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, ChatKind, User};
 
-use super::models::*;
+use super::models::{SDO, Status};
 use super::repository::*;
 
 const INSERT: &str = "INSERT INTO mappings (api_id, chat_id, unique_id) VALUES (?, ?, ?)";
@@ -38,17 +38,17 @@ impl Repository for SQLiteRepo {
 
         let connection: Connection = ok!(sqlite::open(format!("{}/attachments.db", db_path)));
         SQLiteRepo {
-            connection: Arc::new(connection),
+            connection: Arc::new(connection)
         }
     }
 
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool {
-        let select = "SELECT user_name, chat_name FROM users WHERE user_id = ? AND chat_id = ?";
+        let select = "SELECT user_id, chat_id, user_name, chat_name FROM users WHERE user_id = ? AND chat_id = ?";
         match self.connection.prepare(select) {
             Err(e) => {
                 log::error!("Store user: {}", e);
                 false
-            }
+            },
             Ok(mut select_stmt) => {
                 ok!(select_stmt.bind(1, user.id));
                 ok!(select_stmt.bind(2, chat.id));
@@ -81,7 +81,7 @@ impl Repository for SQLiteRepo {
         match &chat.kind {
             ChatKind::Public(public) => {
                 let unknown = String::from("Unknown");
-                let chat_name = public.title.as_ref().unwrap_or(&unknown) as &str;
+                let chat_name = public.title.as_ref().unwrap_or(&unknown);
                 let insert = "INSERT INTO users (user_id, chat_id, user_name, chat_name) VALUES (?, ?, ?, ?)";
                 let mut insert_stmt = ok!(self.connection.prepare(insert));
                 ok!(insert_stmt.bind(1, user.id));
@@ -173,7 +173,7 @@ impl Repository for SQLiteRepo {
         }
     }
 
-    fn insert_duplicate(&self, acc: &Status, sdo: SDO) -> bool {
+    fn insert_duplicate(&self, sdo: SDO) -> bool {
         log::info!(
             "Duplicate: {} - {} - {}",
             sdo.chat.id,

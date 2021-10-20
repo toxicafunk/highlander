@@ -1,20 +1,18 @@
-use sqlite::Value;
-
 use std::sync::Arc;
 
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, User};
 
-use super::models::*;
+use super::models::SDO;
 
-pub trait Repository {
+pub trait Repository<T> {
     fn init() -> Self;
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool;
     fn update_user_timestamp(&self, user: &User, chat: Arc<Chat>) -> bool;
     fn insert_user(&self, user: &User, chat: Arc<Chat>) -> bool;
-    fn item_exists(&self, sdo: SDO, is_media: bool) -> Vec<Value>;
+    fn item_exists(&self, sdo: SDO, is_media: bool) -> Option<T>;
     fn insert_item(&self, sdo: SDO, is_media: bool) -> bool;
-    fn insert_duplicate(&self, acc: &Status, sdo: SDO) -> bool;
+    fn insert_duplicate(&self, sdo: SDO) -> bool;
     fn delete_item(&self, deleted_messages: UpdateDeleteMessages) -> ();
     fn insert_mapping(&self, id: i64, chat_id: i64, unique_id: &str) -> bool;
 }

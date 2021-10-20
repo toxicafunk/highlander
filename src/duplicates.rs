@@ -6,9 +6,9 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{Chat, MediaKind, MessageKind, User};
 
-use crate::repository::Repository;
-use super::sqlite_repo::SQLiteRepo;
 use crate::models::*;
+use crate::repository::Repository;
+use crate::rocksdb::RocksDBRepo;
 
 pub fn extract_last250(text: &str) -> &str {
     let l = text.len();
@@ -16,8 +16,7 @@ pub fn extract_last250(text: &str) -> &str {
     text.get(i..l).unwrap_or("")
 }
 
-pub fn detect_duplicates(message: &Message, user: &User) -> Status {
-    let db: SQLiteRepo = Repository::init();
+pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Status {
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
@@ -190,34 +189,35 @@ pub fn detect_duplicates(message: &Message, user: &User) -> Status {
     r
 }
 
-fn store_user(db: SQLiteRepo, user: &User, chat: Arc<Chat>) -> bool {
+fn store_user(db: RocksDBRepo, user: &User, chat: Arc<Chat>) -> bool {
     let chat = chat.clone();
     if db.chat_user_exists(user, chat.clone()) {
         db.update_user_timestamp(user, chat)
-    } else  {
+    } else {
         db.insert_user(user, chat)
     }
 }
 
-fn handle_message(db: SQLiteRepo, acc: &Status, sdo: SDO, table: &str) -> Status {
+fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
     let existing_item = db.item_exists(sdo.clone(), is_media);
     log::info!("table: {}, SDO: {:?}", table, sdo);
-    if existing_item.is_empty() {
-        db.insert_item(sdo, is_media);
-        Status::new(acc)
-    } else  {
-            log::info!("{:?}", existing_item );
-            let orig_chat_id = match existing_item[0].as_integer() {
-                Some(c) => match c.to_string().strip_prefix("-100") {
-                    Some(s) => s.parse::<i64>().unwrap_or(c),
-                    None => 0,
-                },
+    match existing_item {
+        None => {
+            db.insert_item(sdo, is_media);
+            Status::new(acc)
+        }
+        Some(media) => {
+            log::info!("{:?}", media);
+            let chat_id = media.chat_id;
+            let orig_chat_id = match chat_id.to_string().strip_prefix("-100") {
+                Some(s) => s.parse::<i64>().unwrap_or(chat_id),
                 None => 0,
-           };
-           let orig_msg_id = ok!(existing_item[1].as_integer());
-           log::info!("{} - {}", orig_chat_id, orig_msg_id);
-           Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+            };
+            let orig_msg_id = media.msg_id;
+            log::info!("{} - {}", orig_chat_id, orig_msg_id);
+            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+        }
     }
 }
 

@@ -23,7 +23,19 @@ use rtdlib::Tdlib;
 //use highlander::commands::*;
 use highlander::api_listener::*;
 use highlander::duplicates::detect_duplicates;
+use highlander::repository::Repository;
+use highlander::rocksdb::RocksDBRepo;
 //use highlander::models::HResponse;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use lazy_static::lazy_static;
+
+static INIT_FLAG: AtomicBool = AtomicBool::new(true);
+
+lazy_static! {
+    static ref DB: RocksDBRepo = Repository::init();
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -47,42 +59,57 @@ async fn run() {
     log::info!("Starting Highlander bot...");
     let bot = Bot::from_env().auto_send();
 
-    let api_id = match env::var("TG_ID") {
-        Ok(s) => s.parse::<i32>().unwrap(),
-        Err(_) => 0,
-    };
-    let api_hash = ok!(env::var("TG_HASH"));
-    let token = ok!(env::var("TELOXIDE_TOKEN"));
-
-    let tdlib: Tdlib = Tdlib::new();
-    ok!(Tdlib::set_log_verbosity_level(1));
-
-    loop {
-        match tdlib.receive(2.0) {
-            Some(event) => {
-                log::info!("Event: {:?}", event);
-                match serde_json::from_str::<UpdateAuthorizationState>(&event[..]) {
-                    Ok(state) => {
-                        if state.authorization_state().is_closed() {
-                            log::info!("Authorization closed!");
-                            break;
+    Dispatcher::new(bot)
+        .messages_handler(|rx: DispatcherHandlerRx<AutoSend<Bot>, Message>| {
+            UnboundedReceiverStream::new(rx).for_each_concurrent(None, |cx| async move {
+                let is_test_mode: bool = match env::var("HIGHLANDER_TEST_MODE") {
+                    Ok(mode) => {
+                        if mode == "true" {
+                            true
+                        } else {
+                            false
                         }
-                        if state.authorization_state().is_ready() {
-                            log::info!("Authorization ready!");
-                            break;
-                        }
-                        if state.authorization_state().is_wait_encryption_key() {
-                            tdlib.send(
+                    }
+                    Err(_) => false,
+                };
+
+                if INIT_FLAG.load(Ordering::Relaxed) {
+                    log::info!("Initializing API");
+                    let api_id = match env::var("TG_ID") {
+                        Ok(s) => s.parse::<i32>().unwrap(),
+                        Err(_) => 0,
+                    };
+                    let api_hash = ok!(env::var("TG_HASH"));
+                    let token = ok!(env::var("TELOXIDE_TOKEN"));
+                    let tdlib: Tdlib = Tdlib::new();
+                    ok!(Tdlib::set_log_verbosity_level(1));
+
+                    loop {
+                        match tdlib.receive(2.0) {
+                            Some(event) => {
+                                log::info!("Event: {:?}", event);
+                                match serde_json::from_str::<UpdateAuthorizationState>(&event[..]) {
+                                    Ok(state) => {
+                                        if state.authorization_state().is_closed() {
+                                            log::info!("Authorization closed!");
+                                            break;
+                                        }
+                                        if state.authorization_state().is_ready() {
+                                            log::info!("Authorization ready!");
+                                            break;
+                                        }
+                                        if state.authorization_state().is_wait_encryption_key() {
+                                            tdlib.send(
                                 r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#,
                             );
-                            let bot_auth = format!(
+                                            let bot_auth = format!(
                                 "{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}",
                                 token
                             );
-                            tdlib.send(bot_auth.as_str());
-                        }
-                        if state.authorization_state().is_wait_tdlib_parameters() {
-                            let set_parameters = format!(
+                                            tdlib.send(bot_auth.as_str());
+                                        }
+                                        if state.authorization_state().is_wait_tdlib_parameters() {
+                                            let set_parameters = format!(
                                 "{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
                                     \"api_id\":\"{}\",\
                                     \"api_hash\":\"{}\",\
@@ -94,69 +121,58 @@ async fn run() {
                                     }} }}",
                                 api_id, api_hash, token
                             );
-                            log::info!("{}", set_parameters);
-                            tdlib.send(set_parameters.as_str());
-                        }
-                        if state.authorization_state().is_wait_phone_number() {
-                            log::info!("Wait phone number");
-                        }
-                        if state.authorization_state().is_wait_password() {
-                            log::info!("Wait password");
-                        }
-                        if state.authorization_state().is_wait_code() {
-                            log::info!("Wait code");
-                        }
-                        if state.authorization_state().is_wait_registration() {
-                            log::info!("Wait registration");
+                                            log::info!("{}", set_parameters);
+                                            tdlib.send(set_parameters.as_str());
+                                        }
+                                        if state.authorization_state().is_wait_phone_number() {
+                                            log::info!("Wait phone number");
+                                        }
+                                        if state.authorization_state().is_wait_password() {
+                                            log::info!("Wait password");
+                                        }
+                                        if state.authorization_state().is_wait_code() {
+                                            log::info!("Wait code");
+                                        }
+                                        if state.authorization_state().is_wait_registration() {
+                                            log::info!("Wait registration");
+                                        }
+                                    }
+                                    Err(_) => (),
+                                }
+                            }
+                            None => (),
                         }
                     }
-                    Err(_) => (),
+                    spawn(tgram_listener(tdlib, DB.clone()));
+                    INIT_FLAG.store(false, Ordering::Relaxed);
                 }
-            }
-            None => (),
-        }
-    }
-
-    spawn(tgram_listener(tdlib));
-
-    Dispatcher::new(bot)
-        .messages_handler(|rx: DispatcherHandlerRx<AutoSend<Bot>, Message>| {
-            UnboundedReceiverStream::new(rx).for_each_concurrent(
-                None,
-                |cx| async move {
-
-                let is_test_mode: bool = match env::var("HIGHLANDER_TEST_MODE") {
-                    Ok(mode) => if mode == "true" { true } else { false },
-                    Err(_) => false,
-                };
-
-                //let connection = create_connection();
                 let message: &Message = &cx.update;
 
                 match message.from() {
                     Some(user) => {
                         // Handle normal messages
-                        let member: ChatMember = ok!(cx.requester.get_chat_member(message.chat.id, user.id).await);
+                        let member: ChatMember =
+                            ok!(cx.requester.get_chat_member(message.chat.id, user.id).await);
                         let is_admin = match member.status() {
                             ChatMemberStatus::Administrator => true,
                             ChatMemberStatus::Owner => true,
-                            _ => false
+                            _ => false,
                         };
 
-                        let status = detect_duplicates(&message, user);
+                        let status = detect_duplicates(DB.clone(), &message, user);
                         if is_test_mode || !is_admin {
                             if status.respond {
                                 let mr = cx.answer(status.text).await;
                                 match mr {
                                     Ok(m) => log::info!("Responded: {:?}", m),
-                                    Err(e) => log::error!("Error: {:?}", e)
+                                    Err(e) => log::error!("Error: {:?}", e),
                                 }
                             }
                             if status.action {
                                 let mr = cx.delete_message().await;
                                 match mr {
                                     Ok(m) => log::info!("Deleted message: {:?}", m),
-                                    Err(e) => log::error!("Error: {:?}", e)
+                                    Err(e) => log::error!("Error: {:?}", e),
                                 }
                             }
                         }
@@ -211,10 +227,10 @@ async fn run() {
                             None => ()
                         }*/
                     }
-                    None => ()
+                    None => (),
                 }
-            },
-            )})
+            })
+        })
         .dispatch()
         .await;
 }
