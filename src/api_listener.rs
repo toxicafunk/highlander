@@ -5,10 +5,10 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use super::repository::Repository;
-use super::rocksdb::RocksDBRepo;
+use super::sqlite_repo::SQLiteRepo;
 use super::duplicates::extract_last250;
 
-pub async fn tgram_listener(tdlib: Tdlib, db: RocksDBRepo) -> () {
+pub async fn tgram_listener(tdlib: Tdlib, db: SQLiteRepo) -> () {
     loop {
         match tdlib.receive(5.0) {
             Some(response) => {

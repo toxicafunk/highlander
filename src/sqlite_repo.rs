@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, ChatKind, User};
 
-use super::models::{SDO, Status};
+use super::models::SDO;
 use super::repository::*;
 
 const INSERT: &str = "INSERT INTO mappings (api_id, chat_id, unique_id) VALUES (?, ?, ?)";
@@ -29,7 +29,7 @@ pub struct SQLiteRepo {
     connection: Arc<Connection>,
 }
 
-impl Repository for SQLiteRepo {
+impl Repository<Vec<Value>> for SQLiteRepo {
     fn init() -> Self {
         let db_path = match env::var("HIGHLANDER_DB_PATH") {
             Ok(path) => path,
@@ -101,19 +101,17 @@ impl Repository for SQLiteRepo {
         }
     }
 
-    fn item_exists(&self, sdo: SDO, is_media: bool) -> Vec<Value> {
+    fn item_exists(&self, sdo: SDO, is_media: bool) -> Option<Vec<Value>> {
         let select = if is_media {
             "SELECT chat_id, msg_id, unique_id FROM media WHERE chat_id = ? AND unique_id = ?"
         } else {
             "SELECT chat_id, msg_id, unique_id FROM {} WHERE chat_id = ? AND unique_id = ?"
         };
 
-        let empty_vec = Vec::new();
-
         match self.connection.prepare(select) {
             Err(e) => {
                 log::error!("Handle message: {}", e);
-                empty_vec
+                None
             }
             Ok(mut select_stmt) => {
                 ok!(select_stmt.bind(1, sdo.chat.id));
@@ -122,13 +120,13 @@ impl Repository for SQLiteRepo {
                 match select_cursor.next() {
                     Err(e) => {
                         log::error!("media_exists: {}", e);
-                        empty_vec
+                        None
                     }
                     Ok(row) => match row {
-                        None => empty_vec,
+                        None => None,
                         Some(r) => {
                             let new_vec = r.to_vec();
-                            new_vec.to_owned()
+                            Some(new_vec.to_owned())
                         }
                     },
                 }
@@ -175,10 +173,9 @@ impl Repository for SQLiteRepo {
 
     fn insert_duplicate(&self, sdo: SDO) -> bool {
         log::info!(
-            "Duplicate: {} - {} - {}",
+            "Duplicate: {} - {}",
             sdo.chat.id,
-            sdo.unique_id,
-            acc.text
+            sdo.unique_id
         );
         let insert = "INSERT INTO duplicates (chat_id, unique_id, file_type, file_id, msg_id) VALUES (?, ?, ?, ?, ?)";
         let mut insert_stmt = ok!(self.connection.prepare(insert));

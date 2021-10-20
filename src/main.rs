@@ -24,7 +24,7 @@ use rtdlib::Tdlib;
 use highlander::api_listener::*;
 use highlander::duplicates::detect_duplicates;
 use highlander::repository::Repository;
-use highlander::rocksdb::RocksDBRepo;
+use highlander::sqlite_repo::SQLiteRepo;
 //use highlander::models::HResponse;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,7 +33,7 @@ use lazy_static::lazy_static;
 static INIT_FLAG: AtomicBool = AtomicBool::new(true);
 
 lazy_static! {
-    static ref DB: RocksDBRepo = Repository::init();
+    static ref DB: SQLiteRepo = Repository::init();
 }
 
 

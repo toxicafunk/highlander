@@ -6,5 +6,5 @@ pub mod duplicates;
 pub mod models;
 pub mod repository;
 pub mod time;
-pub mod rocksdb;
-//pub mod sqlite_repo;
+//pub mod rocksdb;
+pub mod sqlite_repo;
