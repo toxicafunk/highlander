@@ -5,36 +5,34 @@ use teloxide::types::{
 use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
 
-use sqlite::Connection;
-
-use std::env;
-
-use rtdlib::types::*;
-use rtdlib::Tdlib;
+//use rtdlib::types::*;
+//use rtdlib::Tdlib;
 
 use super::models::HResponse;
+use super::repository::Repository;
+use super::rocksdb::RocksDBRepo;
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
 pub enum Command {
     #[command(description = "display this text.")]
     Help,
-    #[command(description = "find users present in multiple groups")]
-    FindInterUsers,
+    //#[command(description = "find users present in multiple groups")]
+    //FindInterUsers,
     #[command(description = "retrieves the last n stored media")]
     LastMediaStored(u8),
     #[command(description = "retrieves the last n stored urls")]
     LastUrlStored(u8),
-    #[command(description = "retrieves the last n duplicate URLs found")]
-    LastDuplicateUrls(u8),
     #[command(description = "retrieves the last n duplicate media found")]
     LastDuplicateMedia(u8),
+    #[command(description = "retrieves the last n duplicate URLs found")]
+    LastDuplicateUrls(u8),
     #[command(description = "list a user's groups")]
     ListUserGroups(i64),
-    #[command(description = "find all users on multiple groups")]
+    /*#[command(description = "find all users on multiple groups")]
     GetChatParticipants,
     #[command(description = "find all users who've remained active over n days")]
-    FindInactiveUsers(u8),
+    FindInactiveUsers(u8),*/
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -93,69 +91,64 @@ fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&st
     }
 }
 
+fn str_to_option(str: &String) -> Option<&String> {
+    if str == "" {
+        None
+    } else {
+        Some(str)
+    }
+}
+
 pub fn handle_command(
-    connection: &Connection,
+    db: RocksDBRepo,
     command: Command,
-    chat_id: i64
+    chat_id: i64,
 ) -> Result<HResponse, RequestError> {
-    let get_participants_reply =
-        String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
+    //let get_participants_reply =
+    //    String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
         Command::LastMediaStored(num) => {
-            let select = format!("SELECT * FROM media  WHERE chat_id = {} GROUP BY msg_id ORDER BY timestamp DESC limit {};", chat_id, num);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, file_type) = dbmedia[2];
-                let (_, unique_id) = dbmedia[3];
-                let (_, file_id) = dbmedia[4];
-                let ftype = ok!(file_type);
-                let im: InputMedia = prepare_input_media(ftype, file_id, unique_id);
-                vec.push(im);
-                true
-            }));
+            let media_vec = db.last_media_stored(chat_id, num.into(), false);
+            let vec = media_vec
+                .iter()
+                .map(|media| {
+                    let file_id = str_to_option(&media.file_id).map(|s| s.as_str());
+                    let unique_id = str_to_option(&media.unique_id).map(|s| s.as_str());
+                    prepare_input_media(media.file_type.as_str(), file_id, unique_id)
+                })
+                .collect();
             HResponse::Media(vec)
         }
         Command::LastUrlStored(num) => {
-            let select = format!(
-                "SELECT * FROM urls WHERE chat_id = {} ORDER BY timestamp DESC limit {};",
-                chat_id, num
-            );
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, unique_id) = dbmedia[2];
-                let url: String = ok!(unique_id).into();
-                vec.push(format!("* {}", url));
-                true
-            }));
+            let media_vec = db.last_media_stored(chat_id, num.into(), true);
+            let vec = media_vec
+                .iter()
+                .map(|media| media.unique_id.to_owned())
+                .collect();
             HResponse::URL(vec)
         }
         Command::LastDuplicateMedia(num) => {
-            let select = format!("SELECT * FROM duplicates  WHERE chat_id = {} and file_type != 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, unique_id) = dbmedia[1];
-                let (_, file_type) = dbmedia[2];
-                let (_, file_id) = dbmedia[3];
-                let ftype = ok!(file_type);
-                let im: InputMedia = prepare_input_media(ftype, file_id, unique_id);
-                vec.push(im);
-                true
-            }));
+            let media_vec = db.last_media_duplicated(chat_id, num.into(), false);
+            let vec = media_vec
+                .iter()
+                .map(|media| {
+                    let file_id = str_to_option(&media.file_id).map(|s| s.as_str());
+                    let unique_id = str_to_option(&media.unique_id).map(|s| s.as_str());
+                    prepare_input_media(media.file_type.as_str(), file_id, unique_id)
+                })
+                .collect();
             HResponse::Media(vec)
         }
         Command::LastDuplicateUrls(num) => {
-            let select = format!("SELECT unique_id FROM duplicates  WHERE chat_id = {} and file_type = 'url' ORDER BY timestamp DESC limit {};", chat_id, num);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, unique_id) = dbmedia[0];
-                let url: String = ok!(unique_id).into();
-                vec.push(format!("* {}", url));
-                true
-            }));
+            let media_vec = db.last_media_duplicated(chat_id, num.into(), true);
+            let vec = media_vec
+                .iter()
+                .map(|media| media.unique_id.to_owned())
+                .collect();
             HResponse::URL(vec)
         }
-        Command::FindInterUsers => {
+        /*Command::FindInterUsers => {
             let exclude_list: Vec<&str> = vec![
                 "1733079574",
                 "162726413",
@@ -185,52 +178,45 @@ pub fn handle_command(
                 true
             }));
             HResponse::URL(vec)
-        }
+        }*/
         Command::ListUserGroups(id) => {
-            let select = format!(
-                "SELECT chat_id, chat_name FROM users WHERE user_id = {};",
-                id
-            );
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, chat_id) = dbmedia[0];
-                let (_, chat_name) = dbmedia[1];
-                let hit = format!("GroupId: {}, GroupName: {}", ok!(chat_id), ok!(chat_name));
-                vec.push(hit);
-                true
-            }));
+            let users_vec = db.list_user_groups(chat_id, id);
+            let vec = users_vec
+                .iter()
+                .map(|user| format!("GroupId: {}, GroupName: {}", user.chat_id, user.chat_name))
+                .collect();
             HResponse::URL(vec)
         }
-        Command::GetChatParticipants => {
-            log::info!("Connecting to Telegram...");
-            let chat_ids = get_chat_ids(connection);
-            log::info!("chats: {:?}", chat_ids);
-            get_participants(connection, chat_ids);
+        /*Command::GetChatParticipants => {
+              log::info!("Connecting to Telegram...");
+              let chat_ids = get_chat_ids(connection);
+              log::info!("chats: {:?}", chat_ids);
+              get_participants(connection, chat_ids);
 
-            HResponse::Text(get_participants_reply)
-        }
-        Command::FindInactiveUsers(ndays) => {
-            let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, user_id) = dbmedia[0];
-                let (_, user_name) = dbmedia[1];
-                let (_, timestamp) = dbmedia[2];
-                let hit = format!(
-                    "UserId: {}, UserName: {}, Last Update: {}",
-                    ok!(user_id),
-                    ok!(user_name),
-                    ok!(timestamp)
-                );
-                vec.push(hit);
-                true
-            }));
-            HResponse::URL(vec)
-        }
+              HResponse::Text(get_participants_reply)
+          }
+          Command::FindInactiveUsers(ndays) => {
+              let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
+              let mut vec = Vec::new();
+              ok!(connection.iterate(select, |dbmedia| {
+                  let (_, user_id) = dbmedia[0];
+                  let (_, user_name) = dbmedia[1];
+                  let (_, timestamp) = dbmedia[2];
+                  let hit = format!(
+                      "UserId: {}, UserName: {}, Last Update: {}",
+                      ok!(user_id),
+                      ok!(user_name),
+                      ok!(timestamp)
+                  );
+                  vec.push(hit);
+                  true
+              }));
+              HResponse::URL(vec)
+          }*/
     };
     Ok(r)
 }
-
+/*
 fn get_participants(connection: &Connection, chat_ids: Vec<i64>) {
     let api_id = match env::var("TG_ID") {
         Ok(s) => s.parse::<i32>().unwrap(),
@@ -433,4 +419,4 @@ fn get_chat_ids(connection: &Connection) -> Vec<i64> {
         true
     }));
     vec
-}
+}*/

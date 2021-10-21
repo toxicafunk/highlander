@@ -20,7 +20,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
-    log::info!("Message received: {:?}", message);
+    //log::info!("Message received: {:?}", message);
 
     store_user(db.clone(), user, chat.clone());
 
@@ -192,30 +192,32 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
 fn store_user(db: RocksDBRepo, user: &User, chat: Arc<Chat>) -> bool {
     let chat = chat.clone();
     if db.chat_user_exists(user, chat.clone()) {
+        log::info!("store_user: user {} exists on chat {}", user.id, chat.id);
         db.update_user_timestamp(user, chat)
     } else {
+        log::info!("store_user: creating user {} exists on chat {}", user.id, chat.id);
         db.insert_user(user, chat)
     }
 }
 
 fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
-    let existing_item = db.item_exists(sdo.clone(), is_media);
-    log::info!("table: {}, SDO: {:?}", table, sdo);
-    match existing_item {
+    match db.item_exists(sdo.clone(), is_media) {
         None => {
+            log::info!("inserting new media: {:?}", sdo);
             db.insert_item(sdo, is_media);
             Status::new(acc)
         }
         Some(media) => {
-            log::info!("{:?}", media);
+            log::info!("duplicate media: {:?}", media);
             let chat_id = media.chat_id;
+            db.insert_duplicate(sdo);
             let orig_chat_id = match chat_id.to_string().strip_prefix("-100") {
                 Some(s) => s.parse::<i64>().unwrap_or(chat_id),
                 None => 0,
             };
             let orig_msg_id = media.msg_id;
-            log::info!("{} - {}", orig_chat_id, orig_msg_id);
+            log::info!("orginal {} - {}", orig_chat_id, orig_msg_id);
             Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
         }
     }

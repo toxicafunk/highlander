@@ -3,7 +3,7 @@ mod macros;
 
 use teloxide::prelude::*;
 use teloxide::types::{ChatMember, ChatMemberStatus};
-//use teloxide::utils::command::BotCommand;
+use teloxide::utils::command::BotCommand;
 
 use tokio::spawn;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -20,12 +20,12 @@ use pretty_env_logger::env_logger::Builder;
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
 
-//use highlander::commands::*;
+use highlander::commands::*;
 use highlander::api_listener::*;
 use highlander::duplicates::detect_duplicates;
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
-//use highlander::models::HResponse;
+use highlander::models::HResponse;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use lazy_static::lazy_static;
@@ -146,8 +146,8 @@ async fn run() {
                     spawn(tgram_listener(tdlib, DB.clone()));
                     INIT_FLAG.store(false, Ordering::Relaxed);
                 }
-                let message: &Message = &cx.update;
 
+                let message: &Message = &cx.update;
                 match message.from() {
                     Some(user) => {
                         // Handle normal messages
@@ -178,7 +178,7 @@ async fn run() {
                         }
 
                         // Handle commands
-                        /*let txt_opt = message.text();
+                        let txt_opt = message.text();
                         let bot_name = "highlander";
                         //let bot_name = "ramirez";
 
@@ -186,7 +186,7 @@ async fn run() {
                             Some(txt) => match Command::parse(txt, bot_name) {
                                 Ok(command) => {
                                     if is_admin {
-                                        let cr = handle_command(db, command, message.chat_id());
+                                        let cr = handle_command(DB.clone(), command, message.chat_id());
                                         match cr {
                                             Ok(hr) => match hr {
                                                 HResponse::URL(urls) => {
@@ -225,7 +225,7 @@ async fn run() {
                                 Err(_) => ()
                             },
                             None => ()
-                        }*/
+                        }
                     }
                     None => (),
                 }

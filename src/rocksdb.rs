@@ -15,11 +15,35 @@ use super::repository::*;
 const FOUR_DAYS_SECS: i64 = 345600;
 
 #[allow(unused_variables)]
-fn ttl_cf_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
+fn media_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
     use self::CompactionDecision::*;
     let media: Media = bincode::deserialize(value).unwrap();
     let now = Utc::now().timestamp();
     if now - media.timestamp > FOUR_DAYS_SECS {
+        Remove
+    } else {
+        Keep
+    }
+}
+
+#[allow(unused_variables)]
+fn users_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
+    use self::CompactionDecision::*;
+    let user: DBUser = bincode::deserialize(value).unwrap();
+    let now = Utc::now().timestamp();
+    if now - user.timestamp > FOUR_DAYS_SECS {
+        Remove
+    } else {
+        Keep
+    }
+}
+
+#[allow(unused_variables)]
+fn mappings_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
+    use self::CompactionDecision::*;
+    let mapping: Mapping = bincode::deserialize(value).unwrap();
+    let now = Utc::now().timestamp();
+    if now - mapping.timestamp > FOUR_DAYS_SECS {
         Remove
     } else {
         Keep
@@ -72,18 +96,18 @@ impl Repository<Media> for RocksDBRepo {
 
         let prefix_extractor = SliceTransform::create_fixed_prefix(14); // length of chat_id
 
-        let mut cfopts = Options::default();
-        cfopts.set_compaction_filter("ttl_cf", ttl_cf_filter);
-        let media_descriptor = ColumnFamilyDescriptor::new("media", cfopts);
-        cfopts = Options::default();
-        cfopts.set_compaction_filter("ttl_cf", ttl_cf_filter);
-        let users_descriptor = ColumnFamilyDescriptor::new("users", cfopts);
-        cfopts = Options::default();
-        cfopts.set_compaction_filter("ttl_cf", ttl_cf_filter);
-        let mappings_descriptor = ColumnFamilyDescriptor::new("mappings", cfopts);
-        cfopts = Options::default();
-        cfopts.set_compaction_filter("ttl_cf", ttl_cf_filter);
-        let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", cfopts);
+        let mut media_opts = Options::default();
+        media_opts.set_compaction_filter("ttl_media", media_ttl_filter);
+        let media_descriptor = ColumnFamilyDescriptor::new("media", media_opts);
+        let mut user_opts = Options::default();
+        user_opts.set_compaction_filter("ttl_user", users_ttl_filter);
+        let users_descriptor = ColumnFamilyDescriptor::new("users", user_opts);
+        let mut mappings_opts = Options::default();
+        mappings_opts.set_compaction_filter("ttl_mappings", mappings_ttl_filter);
+        let mappings_descriptor = ColumnFamilyDescriptor::new("mappings", mappings_opts);
+        let mut duplicates_opts = Options::default();
+        duplicates_opts.set_compaction_filter("ttl_duplicates", media_ttl_filter);
+        let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", duplicates_opts);
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -105,16 +129,18 @@ impl Repository<Media> for RocksDBRepo {
 
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool {
         let users_handle = self.db.cf_handle("users").unwrap();
-        let chat_id = bincode::serialize(&chat.id).unwrap();
-        let mut users_it = self.db.prefix_iterator_cf(users_handle, chat_id);
+        let chat_id = chat.id.to_string();
+        let mut users_it = self.db.prefix_iterator_cf(users_handle, chat_id.as_bytes());
         match users_it.find(|(k, _)| {
             let key = String::from_utf8(k.to_vec()).unwrap();
-            match key.get(15..) {
-                None => false,
-                Some(id) => match id.parse::<i64>() {
-                    Ok(i) => i == user.id,
+            let ids: Vec<&str> = key.split("_").collect();
+            if ids.is_empty() {
+                false
+            } else {
+                match ids[1].parse::<i64>() {
+                    Ok(i) => i == user.id && ids[0] == chat_id,
                     Err(_) => false,
-                },
+                }
             }
         }) {
             None => false,
@@ -126,7 +152,7 @@ impl Repository<Media> for RocksDBRepo {
         let users_handle = self.db.cf_handle("users").unwrap();
         let dbuser = user_to_db(user, chat.clone());
         let k = format!("{}_{}", chat.id, user.id);
-        log::info!("Update key: {}", k);
+        log::info!("Update user key: {}", k);
         match bincode::serialize(&dbuser) {
             Err(e) => {
                 log::error!("update_user_timestamp: {}", e);
@@ -143,24 +169,35 @@ impl Repository<Media> for RocksDBRepo {
     }
 
     fn insert_user(&self, user: &User, chat: Arc<Chat>) -> bool {
+        log::info!("insert_user: {} on chat {}", user.id, chat.id);
         self.update_user_timestamp(user, chat)
     }
 
     #[allow(unused_variables)]
     fn item_exists(&self, sdo: SDO, is_media: bool) -> Option<Media> {
         let media_handle = self.db.cf_handle("media").unwrap();
-        let chat_id = bincode::serialize(&sdo.chat.id).unwrap();
-        let mut media_it = self.db.prefix_iterator_cf(media_handle, chat_id);
+        let chat_id = sdo.chat.id.to_string();
+        let mut media_it = self.db.prefix_iterator_cf(media_handle, chat_id.as_bytes());
         match media_it.find(|(k, _)| {
             let key = String::from_utf8(k.to_vec()).unwrap();
-            match key.get(15..) {
-                None => false,
-                Some(id) => id == sdo.unique_id,
+            let prefix = key.get(..14);
+            let id = key.get(15..);
+            match (prefix, id) {
+                (Some(p), Some(k)) => p == chat_id && k == sdo.unique_id,
+                _ => false,
             }
         }) {
-            None => None,
+            None => {
+                log::info!(
+                    "item_exists: key {}_{} not found",
+                    sdo.chat.id,
+                    sdo.unique_id
+                );
+                None
+            }
             Some(media_ser) => {
                 let media: Media = bincode::deserialize(&media_ser.1).unwrap();
+                log::info!("item_exists: media {:?} found", media);
                 Some(media)
             }
         }
@@ -182,7 +219,10 @@ impl Repository<Media> for RocksDBRepo {
                         log::error!("insert_item: {}", e);
                         false
                     }
-                    Ok(_) => true,
+                    Ok(_) => {
+                        log::info!("insert_item: {}", k);
+                        true
+                    }
                 }
             }
         }
@@ -216,21 +256,56 @@ impl Repository<Media> for RocksDBRepo {
     fn delete_item(&self, deleted_messages: UpdateDeleteMessages) -> () {
         let media_handle = self.db.cf_handle("media").unwrap();
         let chat_id = deleted_messages.chat_id();
-        for msg_id in deleted_messages.message_ids() {
-            let k = format!("{}_{}", chat_id, msg_id);
-            match self.db.delete_cf(media_handle, k) {
-                Err(e) => log::error!("delete_item: {}", e),
-                Ok(_) => (),
+        for api_id in deleted_messages.message_ids() {
+            match self.find_mapping(*api_id, chat_id) {
+                None => {
+                    log::error!("Mapping {}_{} not found", chat_id, api_id);
+                }
+                Some(mapping) => {
+                    let unique_id = mapping.unique_id;
+                    let k = format!("{}_{}", chat_id, unique_id);
+                    match self.db.delete_cf(media_handle, key(k.as_bytes())) {
+                        Err(e) => log::error!("delete_item: {}", e),
+                        Ok(_) => log::info!("Deleted {}_{}", chat_id, unique_id),
+                    }
+                }
             }
         }
     }
 
-    fn insert_mapping(&self, id: i64, chat_id: i64, unique_id: &str) -> bool {
+    fn find_mapping(&self, api_id: i64, chat_id: i64) -> Option<Mapping> {
+        let mappings_handle = self.db.cf_handle("mappings").unwrap();
+        let chat_id = chat_id.to_string();
+        let mut mappings_it = self
+            .db
+            .prefix_iterator_cf(mappings_handle, chat_id.as_bytes());
+        match mappings_it.find(|(k, _)| {
+            let key = String::from_utf8(k.to_vec()).unwrap();
+            let ids: Vec<&str> = key.split("_").collect();
+            if ids.is_empty() {
+                false
+            } else {
+                ids[1].parse::<i64>().unwrap_or(0) == api_id && ids[0] == chat_id
+            }
+        }) {
+            None => {
+                log::info!("find_mapping: not found {}_{}", chat_id, api_id);
+                None
+            }
+            Some(mapping_ser) => {
+                let mapping: Mapping = bincode::deserialize(&mapping_ser.1).unwrap();
+                log::info!("find_mapping: found {:?}", mapping);
+                Some(mapping)
+            }
+        }
+    }
+
+    fn insert_mapping(&self, api_id: i64, chat_id: i64, unique_id: &str) -> bool {
         let mappings_handle = self.db.cf_handle("mappings").unwrap();
         let mapping = Mapping {
             unique_id: unique_id.into(),
             chat_id,
-            api_id: id,
+            api_id,
             timestamp: Utc::now().timestamp(),
         };
         match bincode::serialize(&mapping) {
@@ -239,7 +314,7 @@ impl Repository<Media> for RocksDBRepo {
                 false
             }
             Ok(mapping_ser) => {
-                let k = format!("{}_{}", chat_id, unique_id);
+                let k = format!("{}_{}", chat_id, api_id);
                 match self
                     .db
                     .put_cf(mappings_handle, key(k.as_bytes()), mapping_ser)
@@ -248,9 +323,107 @@ impl Repository<Media> for RocksDBRepo {
                         log::error!("insert_mapping: {}", e);
                         false
                     }
-                    Ok(_) => true,
+                    Ok(_) => {
+                        log::info!("insert_mapping: {:?}", mapping);
+                        true
+                    }
                 }
             }
         }
+    }
+
+    fn last_media_stored(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media> {
+        let media_handle = self.db.cf_handle("media").unwrap();
+        let chat_id_str = chat_id.to_string();
+        let media_it = self
+            .db
+            .prefix_iterator_cf(media_handle, chat_id_str.as_bytes());
+        let mut media_vec = media_it
+            .filter(|(k, _)| {
+                let key = String::from_utf8(k.to_vec()).unwrap();
+                match key.get(..14) {
+                    Some(prefix) => prefix == chat_id_str,
+                    None => false,
+                }
+            })
+            .map(|(_, v_ser)| {
+                let media: Media = bincode::deserialize(&v_ser).unwrap();
+                media
+            })
+            .filter(|media| (media.file_type == "url") == is_url)
+            .collect::<Vec<_>>();
+        media_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        media_vec.truncate(limit);
+        media_vec
+    }
+
+    fn last_media_duplicated(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media> {
+        let duplicates_handle = self.db.cf_handle("duplicates").unwrap();
+        let chat_id_str = chat_id.to_string();
+        let duplicates_it = self
+            .db
+            .prefix_iterator_cf(duplicates_handle, chat_id_str.as_bytes());
+        let mut duplicates_vec = duplicates_it
+            .filter(|(k, _)| {
+                let key = String::from_utf8(k.to_vec()).unwrap();
+                match key.get(..14) {
+                    Some(prefix) => prefix == chat_id_str,
+                    None => false,
+                }
+            })
+            .map(|(_, v_ser)| {
+                let duplicates: Media = bincode::deserialize(&v_ser).unwrap();
+                duplicates
+            })
+            .filter(|duplicate| (duplicate.file_type == "url") == is_url)
+            .collect::<Vec<_>>();
+        duplicates_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        duplicates_vec.truncate(limit);
+        duplicates_vec
+    }
+
+    fn list_user_groups(&self, chat_id: i64, user_id: i64) -> Vec<DBUser> {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let chat_id_str = chat_id.to_string();
+        let users_it = self
+            .db
+            .prefix_iterator_cf(users_handle, chat_id_str.as_bytes());
+        let users_vec = users_it
+            .filter(|(k, _)| {
+                let key = String::from_utf8(k.to_vec()).unwrap();
+                match key.get(15..) {
+                    None => false,
+                    Some(id) => match id.parse::<i64>() {
+                        Ok(i) => i == user_id,
+                        Err(_) => false
+                    },
+                }
+            })
+            .map(|(_, v_ser)| {
+                let users: DBUser = bincode::deserialize(&v_ser).unwrap();
+                users
+            })
+            .collect::<Vec<_>>();
+        users_vec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_split_str() {
+        let key = "-1001445478423_1072037897";
+        let ids: Vec<&str> = key.split("_").collect();
+        println!("{} | {}", ids[0], ids[1]);
+        assert_eq!(ids[0], "-1001445478423");
+        assert_eq!(ids[1], "1072037897");
+    }
+
+    #[test]
+    fn test_bool() {
+        assert_eq!((("url" == "url") == true), true);
+        assert_eq!((("url" == "url") == false), false);
+        assert_eq!((("photo" == "url") == true), false);
+        assert_eq!((("video" == "url") == false), true);
     }
 }

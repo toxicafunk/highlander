@@ -3,7 +3,8 @@ use std::sync::Arc;
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, User};
 
-use super::models::SDO;
+use super::models::{Mapping, Media, SDO};
+use super::models::{User as DBUser};
 
 pub trait Repository<T> {
     fn init() -> Self;
@@ -14,7 +15,11 @@ pub trait Repository<T> {
     fn insert_item(&self, sdo: SDO, is_media: bool) -> bool;
     fn insert_duplicate(&self, sdo: SDO) -> bool;
     fn delete_item(&self, deleted_messages: UpdateDeleteMessages) -> ();
-    fn insert_mapping(&self, id: i64, chat_id: i64, unique_id: &str) -> bool;
+    fn insert_mapping(&self, api_id: i64, chat_id: i64, unique_id: &str) -> bool;
+    fn find_mapping(&self, api_id: i64, chat_id: i64) -> Option<Mapping>;
+    fn last_media_stored(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
+    fn last_media_duplicated(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
+    fn list_user_groups(&self, chat_id: i64, user_id: i64) -> Vec<DBUser>;
 }
 
 #[cfg(test)]
@@ -42,7 +47,7 @@ mod tests {
 
     #[test]
     fn test_db() {
-        let path = "/home/enrs/src/rust/highlander/.rocksdb";
+        let path = "/home/enrs/src/rust/highlander/.rocksdb_def";
         let mut opts = Options::default();
         opts.create_if_missing(true);
         //{
