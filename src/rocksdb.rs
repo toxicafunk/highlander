@@ -6,7 +6,11 @@ use teloxide::types::{Chat, ChatKind, User};
 
 use bincode;
 use chrono::offset::Utc;
-use rocksdb::{ColumnFamilyDescriptor, CompactionDecision, Options, SliceTransform, DB};
+use rocksdb::{
+    ColumnFamilyDescriptor, CompactionDecision, IteratorMode, Options, SliceTransform, DB,
+};
+
+use itertools::Itertools;
 
 use super::models::User as DBUser;
 use super::models::{Mapping, Media, SDO};
@@ -128,8 +132,12 @@ impl Repository<Media> for RocksDBRepo {
     }
 
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool {
+        self.chat_dbuser_exists(user.id, chat.id)
+    }
+
+    fn chat_dbuser_exists(&self, user_id: i64, chat_id: i64) -> bool {
         let users_handle = self.db.cf_handle("users").unwrap();
-        let chat_id = chat.id.to_string();
+        let chat_id = chat_id.to_string();
         let mut users_it = self.db.prefix_iterator_cf(users_handle, chat_id.as_bytes());
         match users_it.find(|(k, _)| {
             let key = String::from_utf8(k.to_vec()).unwrap();
@@ -138,7 +146,7 @@ impl Repository<Media> for RocksDBRepo {
                 false
             } else {
                 match ids[1].parse::<i64>() {
-                    Ok(i) => i == user.id && ids[0] == chat_id,
+                    Ok(i) => i == user_id && ids[0] == chat_id,
                     Err(_) => false,
                 }
             }
@@ -351,6 +359,9 @@ impl Repository<Media> for RocksDBRepo {
                 media
             })
             .filter(|media| (media.file_type == "url") == is_url)
+            .group_by(|media| media.msg_id)
+            .into_iter()
+            .map(|(_, mut g)| g.next().unwrap())
             .collect::<Vec<_>>();
         media_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         media_vec.truncate(limit);
@@ -376,6 +387,9 @@ impl Repository<Media> for RocksDBRepo {
                 duplicates
             })
             .filter(|duplicate| (duplicate.file_type == "url") == is_url)
+            .group_by(|media| media.msg_id)
+            .into_iter()
+            .map(|(_, mut g)| g.next().unwrap())
             .collect::<Vec<_>>();
         duplicates_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         duplicates_vec.truncate(limit);
@@ -395,16 +409,106 @@ impl Repository<Media> for RocksDBRepo {
                     None => false,
                     Some(id) => match id.parse::<i64>() {
                         Ok(i) => i == user_id,
-                        Err(_) => false
+                        Err(_) => false,
                     },
                 }
             })
             .map(|(_, v_ser)| {
-                let users: DBUser = bincode::deserialize(&v_ser).unwrap();
-                users
+                let user: DBUser = bincode::deserialize(&v_ser).unwrap();
+                user
             })
             .collect::<Vec<_>>();
         users_vec
+    }
+
+    fn get_chat_ids(&self) -> Vec<i64> {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);
+        let users_vec = users_it
+            .dedup_by(|(k1, _), (k2, _)| {
+                let key1 = String::from_utf8(k1.to_vec()).unwrap();
+                let key2 = String::from_utf8(k2.to_vec()).unwrap();
+                match (key1.get(15..), key2.get(15..)) {
+                    (Some(id1), Some(id2)) => id1 == id2,
+                    _ => false,
+                }
+            })
+            .map(|(k, _)| {
+                let key = String::from_utf8(k.to_vec()).unwrap();
+                match key.get(15..) {
+                    None => 0,
+                    Some(id) => match id.parse::<i64>() {
+                        Ok(i) => i,
+                        Err(_) => 0,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        users_vec
+    }
+
+    fn insert_dbuser(&self, user: DBUser) -> bool {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let k = format!("{}_{}", user.chat_id, user.user_id);
+        log::info!("Insert DBUser key: {}", k);
+        match bincode::serialize(&user) {
+            Err(e) => {
+                log::error!("insert_dbuser: {}", e);
+                false
+            }
+            Ok(v) => match self.db.put_cf(users_handle, key(k.as_bytes()), v) {
+                Err(e) => {
+                    log::error!("insert_dbuser: {}", e);
+                    false
+                }
+                Ok(_) => true,
+            },
+        }
+    }
+
+    fn list_media(&self, limit: usize) -> Vec<Media> {
+        let media_handle = self.db.cf_handle("media").unwrap();
+        let media_it = self.db.iterator_cf(media_handle, IteratorMode::Start);
+        let mut media_vec = media_it
+            .map(|(_, v_ser)| {
+                let media: Media = bincode::deserialize(&v_ser).unwrap();
+                media
+            })
+            .collect::<Vec<_>>();
+        if limit > 0 {
+            media_vec.truncate(limit);
+        }
+        media_vec
+    }
+
+    fn list_users(&self, limit: usize) -> Vec<DBUser> {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);
+        let mut users_vec = users_it
+            .map(|(_, v_ser)| {
+                let user: DBUser = bincode::deserialize(&v_ser).unwrap();
+                user
+            })
+            .collect::<Vec<_>>();
+        if limit > 0 {
+            users_vec.truncate(limit);
+        }
+        users_vec
+    }
+
+    fn list_duplicates(&self, limit: usize) -> Vec<Media> {
+        let media_handle = self.db.cf_handle("duplicates").unwrap();
+        let media_it = self.db.iterator_cf(media_handle, IteratorMode::Start);
+        let mut media_vec = media_it
+            .map(|(_, v_ser)| {
+                let media: Media = bincode::deserialize(&v_ser).unwrap();
+                media
+            })
+            .collect::<Vec<_>>();
+        if limit > 0 {
+            media_vec.truncate(limit);
+        }
+        media_vec
     }
 }
 

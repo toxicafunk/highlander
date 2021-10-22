@@ -8,6 +8,7 @@ use super::models::{User as DBUser};
 
 pub trait Repository<T> {
     fn init() -> Self;
+    fn chat_dbuser_exists(&self, user_id: i64, chat_id: i64) -> bool;
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool;
     fn update_user_timestamp(&self, user: &User, chat: Arc<Chat>) -> bool;
     fn insert_user(&self, user: &User, chat: Arc<Chat>) -> bool;
@@ -20,6 +21,11 @@ pub trait Repository<T> {
     fn last_media_stored(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
     fn last_media_duplicated(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
     fn list_user_groups(&self, chat_id: i64, user_id: i64) -> Vec<DBUser>;
+    fn get_chat_ids(&self) -> Vec<i64>;
+    fn insert_dbuser(&self, user: DBUser) -> bool;
+    fn list_media(&self, limit: usize) -> Vec<Media>;
+    fn list_users(&self, limit: usize) -> Vec<DBUser>;
+    fn list_duplicates(&self, limit: usize) -> Vec<Media>;
 }
 
 #[cfg(test)]

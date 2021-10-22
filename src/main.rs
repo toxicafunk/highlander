@@ -11,7 +11,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 //use std::convert::Infallible;
 use std::env;
 use std::io::Write;
-//use std::sync::Arc;
+use std::sync::Arc;
 
 use chrono::Local;
 use log::LevelFilter;
@@ -20,22 +20,95 @@ use pretty_env_logger::env_logger::Builder;
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
 
+use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
-use highlander::api_listener::*;
 use highlander::duplicates::detect_duplicates;
+use highlander::models::HResponse;
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
-use highlander::models::HResponse;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static INIT_FLAG: AtomicBool = AtomicBool::new(true);
 
 lazy_static! {
     static ref DB: RocksDBRepo = Repository::init();
+    static ref TDLIB: Arc<Tdlib> = Arc::new(Tdlib::new());
 }
 
+fn init_tgram() -> () {
+    log::info!("Initializing API");
+
+        let api_id = match env::var("TG_ID") {
+            Ok(s) => s.parse::<i32>().unwrap(),
+            Err(_) => 0,
+        };
+        let api_hash = ok!(env::var("TG_HASH"));
+        let token = ok!(env::var("TELOXIDE_TOKEN"));
+
+        ok!(Tdlib::set_log_verbosity_level(1));
+
+        loop {
+            match TDLIB.receive(2.0) {
+                Some(event) => {
+                    log::info!("Event: {:?}", event);
+                    match serde_json::from_str::<UpdateAuthorizationState>(&event[..]) {
+                        Ok(state) => {
+                            if state.authorization_state().is_closed() {
+                                log::info!("Authorization closed!");
+                                break;
+                            }
+                            if state.authorization_state().is_ready() {
+                                log::info!("Authorization ready!");
+                                break;
+                            }
+                            if state.authorization_state().is_wait_encryption_key() {
+                                TDLIB.send(
+                                r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#,
+                            );
+                                let bot_auth = format!(
+                                "{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}",
+                                token
+                            );
+                                TDLIB.send(bot_auth.as_str());
+                            }
+                            if state.authorization_state().is_wait_tdlib_parameters() {
+                                let set_parameters = format!(
+                                    "{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
+                                    \"api_id\":\"{}\",\
+                                    \"api_hash\":\"{}\",\
+                                    \"bot_auth_token\":\"{}\",\
+                                    \"database_directory\":\"tdlib\",\
+                                    \"system_language_code\":\"en\",\
+                                    \"device_model\":\"Desktop\",\
+                                    \"application_version\":\"1.0.0\"\
+                                    }} }}",
+                                    api_id, api_hash, token
+                                );
+                                log::info!("{}", set_parameters);
+                                TDLIB.send(set_parameters.as_str());
+                            }
+                            if state.authorization_state().is_wait_phone_number() {
+                                log::info!("Wait phone number");
+                            }
+                            if state.authorization_state().is_wait_password() {
+                                log::info!("Wait password");
+                            }
+                            if state.authorization_state().is_wait_code() {
+                                log::info!("Wait code");
+                            }
+                            if state.authorization_state().is_wait_registration() {
+                                log::info!("Wait registration");
+                            }
+                        }
+                        Err(_) => (),
+                    }
+                }
+                None => (),
+            }
+        }
+}
 
 #[tokio::main]
 async fn main() {
@@ -74,76 +147,8 @@ async fn run() {
                 };
 
                 if INIT_FLAG.load(Ordering::Relaxed) {
-                    log::info!("Initializing API");
-                    let api_id = match env::var("TG_ID") {
-                        Ok(s) => s.parse::<i32>().unwrap(),
-                        Err(_) => 0,
-                    };
-                    let api_hash = ok!(env::var("TG_HASH"));
-                    let token = ok!(env::var("TELOXIDE_TOKEN"));
-                    let tdlib: Tdlib = Tdlib::new();
-                    ok!(Tdlib::set_log_verbosity_level(1));
-
-                    loop {
-                        match tdlib.receive(2.0) {
-                            Some(event) => {
-                                log::info!("Event: {:?}", event);
-                                match serde_json::from_str::<UpdateAuthorizationState>(&event[..]) {
-                                    Ok(state) => {
-                                        if state.authorization_state().is_closed() {
-                                            log::info!("Authorization closed!");
-                                            break;
-                                        }
-                                        if state.authorization_state().is_ready() {
-                                            log::info!("Authorization ready!");
-                                            break;
-                                        }
-                                        if state.authorization_state().is_wait_encryption_key() {
-                                            tdlib.send(
-                                r#"{"@type": "checkDatabaseEncryptionKey", "encryption_key": ""}"#,
-                            );
-                                            let bot_auth = format!(
-                                "{{ \"@type\":\"checkAuthenticationBotToken\",\"token\":\"{}\" }}",
-                                token
-                            );
-                                            tdlib.send(bot_auth.as_str());
-                                        }
-                                        if state.authorization_state().is_wait_tdlib_parameters() {
-                                            let set_parameters = format!(
-                                "{{ \"@type\":\"setTdlibParameters\",\"parameters\": {{\
-                                    \"api_id\":\"{}\",\
-                                    \"api_hash\":\"{}\",\
-                                    \"bot_auth_token\":\"{}\",\
-                                    \"database_directory\":\"tdlib\",\
-                                    \"system_language_code\":\"en\",\
-                                    \"device_model\":\"Desktop\",\
-                                    \"application_version\":\"1.0.0\"\
-                                    }} }}",
-                                api_id, api_hash, token
-                            );
-                                            log::info!("{}", set_parameters);
-                                            tdlib.send(set_parameters.as_str());
-                                        }
-                                        if state.authorization_state().is_wait_phone_number() {
-                                            log::info!("Wait phone number");
-                                        }
-                                        if state.authorization_state().is_wait_password() {
-                                            log::info!("Wait password");
-                                        }
-                                        if state.authorization_state().is_wait_code() {
-                                            log::info!("Wait code");
-                                        }
-                                        if state.authorization_state().is_wait_registration() {
-                                            log::info!("Wait registration");
-                                        }
-                                    }
-                                    Err(_) => (),
-                                }
-                            }
-                            None => (),
-                        }
-                    }
-                    spawn(tgram_listener(tdlib, DB.clone()));
+                    init_tgram();
+                    spawn(tgram_listener(TDLIB.clone(), DB.clone()));
                     INIT_FLAG.store(false, Ordering::Relaxed);
                 }
 
@@ -186,7 +191,7 @@ async fn run() {
                             Some(txt) => match Command::parse(txt, bot_name) {
                                 Ok(command) => {
                                     if is_admin {
-                                        let cr = handle_command(DB.clone(), command, message.chat_id());
+                                        let cr = handle_command(DB.clone(), TDLIB.clone(), command, message.chat_id());
                                         match cr {
                                             Ok(hr) => match hr {
                                                 HResponse::URL(urls) => {

@@ -27,3 +27,4 @@ regex = "1.5.4"
 rocksdb = "0.17.0"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.2.1"
+itertools = "0.10.0"
