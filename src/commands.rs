@@ -6,6 +6,7 @@ use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
 
 use rtdlib::Tdlib;
+
 use std::sync::Arc;
 
 use super::models::HResponse;
@@ -113,6 +114,8 @@ pub fn handle_command(
 ) -> Result<HResponse, RequestError> {
     let get_participants_reply =
         String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
+    let response_too_long =
+        String::from("Respuesta demasiado larga para mostart en Telegram, ver logs.");
     let r = match command {
         Command::Help => HResponse::URL(vec![Command::descriptions()]),
         Command::LastMediaStored(num) => {
@@ -195,40 +198,38 @@ pub fn handle_command(
             HResponse::URL(vec)
         }
         Command::GetChatParticipants => {
-              log::info!("Connecting to Telegram...");
-              let chat_ids = db.get_chat_ids();
-              log::info!("chats: {:?}", chat_ids);
-              get_participants(tdlib, chat_ids);
-              HResponse::Text(get_participants_reply)
-          }
-         /* Command::FindInactiveUsers(ndays) => {
-              let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
-              let mut vec = Vec::new();
-              ok!(connection.iterate(select, |dbmedia| {
-                  let (_, user_id) = dbmedia[0];
-                  let (_, user_name) = dbmedia[1];
-                  let (_, timestamp) = dbmedia[2];
-                  let hit = format!(
-                      "UserId: {}, UserName: {}, Last Update: {}",
-                      ok!(user_id),
-                      ok!(user_name),
-                      ok!(timestamp)
-                  );
-                  vec.push(hit);
-                  true
-              }));
-              HResponse::URL(vec)
-          }*/
-
+            log::info!("Connecting to Telegram...");
+            let chat_ids = db.get_chat_ids();
+            log::info!("chats: {:?}", chat_ids);
+            get_participants(tdlib, chat_ids);
+            HResponse::Text(get_participants_reply)
+        }
+        /* Command::FindInactiveUsers(ndays) => {
+            let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
+            let mut vec = Vec::new();
+            ok!(connection.iterate(select, |dbmedia| {
+                let (_, user_id) = dbmedia[0];
+                let (_, user_name) = dbmedia[1];
+                let (_, timestamp) = dbmedia[2];
+                let hit = format!(
+                    "UserId: {}, UserName: {}, Last Update: {}",
+                    ok!(user_id),
+                    ok!(user_name),
+                    ok!(timestamp)
+                );
+                vec.push(hit);
+                true
+            }));
+            HResponse::URL(vec)
+        }*/
         Command::ListMedia(num) => {
             let media_vec = db.list_media(num.into());
             let vec = media_vec
                 .iter()
-                .map(|media| {
-                    format!("{:?}", media)
-                })
-                .collect();
-            HResponse::Text(vec)
+                .map(|media| format!("{:?}", media))
+                .collect::<Vec<_>>();
+            log::info!("ListMedia: {}", vec.join("\n"));
+            HResponse::Text(response_too_long)
         }
 
         Command::ListUsers(num) => {
@@ -236,19 +237,19 @@ pub fn handle_command(
             let vec = users_vec
                 .iter()
                 .map(|user| format!("{:?}", user))
-                .collect();
-            HResponse::Text(vec)
+                .collect::<Vec<_>>();
+            log::info!("ListUsers: {}", vec.join("\n"));
+            HResponse::Text(response_too_long)
         }
 
         Command::ListDuplicates(num) => {
             let media_vec = db.list_duplicates(num.into());
             let vec = media_vec
                 .iter()
-                .map(|media| {
-                    format!("{:?}", media)
-                })
-               .collect();
-            HResponse::Text(vec)
+                .map(|media| format!("{:?}", media))
+                .collect::<Vec<_>>();
+            log::info!("ListDuplicates: {}", vec.join("\n"));
+            HResponse::Text(response_too_long)
         }
     };
     Ok(r)
@@ -256,10 +257,14 @@ pub fn handle_command(
 
 fn get_participants(tdlib: Arc<Tdlib>, chat_ids: Vec<i64>) {
     for id in chat_ids {
+        let tdlib = tdlib.clone();
         //block_on(get_participants(id));
         log::info!("chat_id: {}", id);
-        let chat_request = format!("{{\"@type\":\"getChat\",\"chat_id\":\"{}\" }}", id);
-        tdlib.send(chat_request.as_str());
+        let chat_request = serde_json::json!({
+            "@type": "getChat",
+            "chat_id": id
+        });
+        tdlib.send(chat_request.to_string().as_str());
     }
 
     log::info!("No more updates");

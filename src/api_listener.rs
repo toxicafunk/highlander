@@ -1,15 +1,15 @@
 use rtdlib::types::{
-    Chat, ChatMembers, ChatType, MessageContent, MessageSender, TextEntityType,
-    UpdateDeleteMessages, UpdateNewMessage
+    Chat, ChatMembers, ChatType, MessageContent, TextEntityType,
+    UpdateDeleteMessages, UpdateNewMessage,
 };
 use rtdlib::Tdlib;
 
+use chrono::offset::Utc;
 use lazy_static::lazy_static;
 use regex::Regex;
-use chrono::offset::Utc;
 
-use std::sync::Arc;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::duplicates::extract_last250;
 use super::models::User;
@@ -118,7 +118,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
                                 ChatType::Supergroup(group) => group.supergroup_id(),
                                 ChatType::Private(private) => private.user_id(),
                                 ChatType::Secret(secret) => secret.user_id(),
-                                _ => 0
+                                _ => 0,
                             };
 
                             chat_ids.push_back(supergroup_id);
@@ -138,31 +138,24 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
                                 Ok(members) => {
                                     let total_count = members.total_count();
                                     let chat_id = chat_ids.pop_front().unwrap();
-                                    log::info!("chatMembers: total {} chat_id {}", total_count, chat_id);
+                                    log::info!(
+                                        "chatMembers: total {} chat_id {}",
+                                        total_count,
+                                        chat_id
+                                    );
                                     for member in members.members() {
-                                        match member.member_id() {
-                                            MessageSender::User(sender) => {
-                                                log::info!("MessageSender:User: {:?}", sender);
-                                                let dbuser = User {
-                                                    user_id: sender.user_id(),
-                                                    chat_id,
-                                                    user_name: String::default(),
-                                                    chat_name: String::default(),
-                                                    timestamp: Utc::now().timestamp()
-                                                };
-                                                if db.chat_dbuser_exists(dbuser.user_id, dbuser.chat_id) {
-                                                    log::info!("chatMembers: exists {:?}", dbuser)
-                                                } else {
-                                                    log::info!("chatMembers: inserting {:?}", dbuser);
-                                                    db.insert_dbuser(dbuser);
-                                                }
-                                            }
-                                            MessageSender::Chat(chat) => {
-                                                log::warn!("chatMembers: Ignore {:?}", chat)
-                                            }
-                                            MessageSender::_Default(_) => {
-                                                log::warn!("chatMembers: This shouldn't have happened!")
-                                            }
+                                        let dbuser = User {
+                                            user_id: member.user_id(),
+                                            chat_id,
+                                            user_name: String::default(),
+                                            chat_name: String::default(),
+                                            timestamp: Utc::now().timestamp(),
+                                        };
+                                        if db.chat_dbuser_exists(dbuser.user_id, dbuser.chat_id) {
+                                            log::info!("chatMembers: exists {:?}", dbuser)
+                                        } else {
+                                            log::info!("chatMembers: inserting {:?}", dbuser);
+                                            db.insert_dbuser(dbuser);
                                         }
                                     }
 

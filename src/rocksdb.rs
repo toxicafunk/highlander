@@ -428,14 +428,14 @@ impl Repository<Media> for RocksDBRepo {
             .dedup_by(|(k1, _), (k2, _)| {
                 let key1 = String::from_utf8(k1.to_vec()).unwrap();
                 let key2 = String::from_utf8(k2.to_vec()).unwrap();
-                match (key1.get(15..), key2.get(15..)) {
+                match (key1.get(..14), key2.get(..14)) {
                     (Some(id1), Some(id2)) => id1 == id2,
                     _ => false,
                 }
             })
             .map(|(k, _)| {
                 let key = String::from_utf8(k.to_vec()).unwrap();
-                match key.get(15..) {
+                match key.get(..14) {
                     None => 0,
                     Some(id) => match id.parse::<i64>() {
                         Ok(i) => i,
