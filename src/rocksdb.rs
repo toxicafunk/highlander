@@ -6,6 +6,8 @@ use teloxide::types::{Chat, ChatKind, User};
 
 use bincode;
 use chrono::offset::Utc;
+use chrono::Duration;
+
 use rocksdb::{
     ColumnFamilyDescriptor, CompactionDecision, IteratorMode, Options, SliceTransform, DB,
 };
@@ -13,7 +15,7 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Mapping, Media, SDO};
+use super::models::{Group, Mapping, Media, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
@@ -112,6 +114,8 @@ impl Repository<Media> for RocksDBRepo {
         let mut duplicates_opts = Options::default();
         duplicates_opts.set_compaction_filter("ttl_duplicates", media_ttl_filter);
         let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", duplicates_opts);
+        let groups_opts = Options::default();
+        let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -123,6 +127,7 @@ impl Repository<Media> for RocksDBRepo {
             users_descriptor,
             mappings_descriptor,
             duplicates_descriptor,
+            groups_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -356,12 +361,12 @@ impl Repository<Media> for RocksDBRepo {
             })
             .map(|(_, v_ser)| {
                 let media: Media = bincode::deserialize(&v_ser).unwrap();
-                media
+                (media.msg_id, media)
             })
-            .filter(|media| (media.file_type == "url") == is_url)
-            .group_by(|media| media.msg_id)
+            .filter(|tup| (tup.1.file_type == "url") == is_url)
+            .into_group_map()
             .into_iter()
-            .map(|(_, mut g)| g.next().unwrap())
+            .map(|(_, g)| g.first().unwrap().clone())
             .collect::<Vec<_>>();
         media_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         media_vec.truncate(limit);
@@ -384,12 +389,12 @@ impl Repository<Media> for RocksDBRepo {
             })
             .map(|(_, v_ser)| {
                 let duplicates: Media = bincode::deserialize(&v_ser).unwrap();
-                duplicates
+                (duplicates.msg_id, duplicates)
             })
-            .filter(|duplicate| (duplicate.file_type == "url") == is_url)
-            .group_by(|media| media.msg_id)
+            .filter(|tup| (tup.1.file_type == "url") == is_url)
+            .into_group_map()
             .into_iter()
-            .map(|(_, mut g)| g.next().unwrap())
+            .map(|(_, g)| g.first().unwrap().clone())
             .collect::<Vec<_>>();
         duplicates_vec.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         duplicates_vec.truncate(limit);
@@ -509,6 +514,83 @@ impl Repository<Media> for RocksDBRepo {
             media_vec.truncate(limit);
         }
         media_vec
+    }
+
+    fn get_users_chat_count(&self) -> Vec<(DBUser, usize)> {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);
+        let users_vec = users_it
+            .map(|(_, v_ser)| {
+                let user: DBUser = bincode::deserialize(&v_ser).unwrap();
+                (user.user_id, user)
+            })
+            .into_group_map()
+            .into_iter()
+            .map(|(_, g)| {
+                let count = g.len();
+                let user = g.first().unwrap().clone();
+                (user, count)
+            })
+            .filter(|tup| tup.1 > 1)
+            .collect::<Vec<_>>();
+        users_vec
+    }
+
+    fn inactive_users_before(&self, ndays: i64) -> Vec<DBUser> {
+        let users_handle = self.db.cf_handle("users").unwrap();
+        let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);
+        let users_vec = users_it
+            .map(|(_, v_ser)| {
+                let user: DBUser = bincode::deserialize(&v_ser).unwrap();
+                user
+            })
+            .filter(|user| {
+                let offset_day = Utc::now() - Duration::days(ndays);
+                user.timestamp < offset_day.timestamp()
+            })
+            .collect::<Vec<_>>();
+        users_vec
+    }
+
+    fn insert_group(&self, group: Group) -> bool {
+        let groups_handle = self.db.cf_handle("groups").unwrap();
+        let k = format!("{}", group.supergroup_id);
+        log::info!("Insert Group key: {}", k);
+        match bincode::serialize(&group) {
+            Err(e) => {
+                log::error!("insert_dbgroup: {}", e);
+                false
+            }
+            Ok(v) => match self.db.put_cf(groups_handle, key(k.as_bytes()), v) {
+                Err(e) => {
+                    log::error!("insert_group: {}", e);
+                    false
+                }
+                Ok(_) => true,
+            },
+        }
+    }
+
+    fn get_group(&self, supergroup_id: i64) -> Option<Group> {
+        let groups_handle = self.db.cf_handle("groups").unwrap();
+        let mut groups_it = self.db.iterator_cf(groups_handle, IteratorMode::Start);
+        match groups_it.find(|(k, _)| {
+            let key = String::from_utf8(k.to_vec()).unwrap();
+            match key.parse::<i64>() {
+                Ok(id) => id == supergroup_id,
+                Err(_) => false
+            }
+
+        }) {
+            Some(group_ser) => {
+                let group: Group = bincode::deserialize(&group_ser.1).unwrap();
+                Some(group)
+            },
+            None => {
+                log::error!("get_group: {} not found", supergroup_id);
+                None
+            }
+        }
     }
 }
 

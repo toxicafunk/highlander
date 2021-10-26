@@ -37,7 +37,7 @@ pub enum HResponse {
     Text(String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Media {
     pub unique_id: String,
     pub chat_id: i64,
@@ -47,7 +47,7 @@ pub struct Media {
     pub timestamp: i64
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct User {
     pub user_id: i64,
     pub chat_id: i64,
@@ -56,7 +56,7 @@ pub struct User {
     pub timestamp: i64
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mapping {
     pub unique_id: String,
     pub chat_id: i64,
@@ -69,4 +69,12 @@ pub enum ColFam {
     MediaCF(Media),
     UserCF(User),
     MappingCF(Mapping)
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Group {
+    pub supergroup_id: i64,
+    pub chat_id: i64,
+    pub offset: i64,
+    pub timestamp: i64
 }

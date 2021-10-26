@@ -4,8 +4,9 @@ use teloxide::types::{
 };
 use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
-
 use rtdlib::Tdlib;
+
+use chrono::offset::{TimeZone, Utc};
 
 use std::sync::Arc;
 
@@ -18,8 +19,8 @@ use super::rocksdb::RocksDBRepo;
 pub enum Command {
     #[command(description = "display this text.")]
     Help,
-    //#[command(description = "find users present in multiple groups")]
-    //FindInterUsers,
+    #[command(description = "find users present in multiple groups")]
+    FindInterUsers,
     #[command(description = "retrieves the last n stored media")]
     LastMediaStored(u8),
     #[command(description = "retrieves the last n stored urls")]
@@ -32,14 +33,16 @@ pub enum Command {
     ListUserGroups(i64),
     #[command(description = "find all users on multiple groups")]
     GetChatParticipants,
-    /*#[command(description = "find all users who've remained active over n days")]
-    FindInactiveUsers(u8),*/
+    #[command(description = "find all users who've remained active over n days")]
+    FindInactiveUsers(i64),
     #[command(description = "find all users on multiple groups")]
     ListMedia(u8),
     #[command(description = "find all users on multiple groups")]
     ListUsers(u8),
     #[command(description = "find all users on multiple groups")]
     ListDuplicates(u8),
+    #[command(description = "Get the Ids of all chats managed by highlander")]
+    GetChatIds,
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -158,7 +161,7 @@ pub fn handle_command(
                 .collect();
             HResponse::URL(vec)
         }
-        /*Command::FindInterUsers => {
+        Command::FindInterUsers => {
             let exclude_list: Vec<&str> = vec![
                 "1733079574",
                 "162726413",
@@ -167,28 +170,26 @@ pub fn handle_command(
                 "785731637",
                 "208056682",
             ];
-            let select = "SELECT *, COUNT(*) as cnt FROM users GROUP BY user_id HAVING cnt > 1;";
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, user_id) = dbmedia[0];
-                let (_, chat_id) = dbmedia[1];
-                let (_, user_name) = dbmedia[2];
-                let (_, cnt) = dbmedia[5];
-                let user_id = ok!(user_id);
-                if !exclude_list.contains(&user_id) {
-                    let hit = format!(
+
+            let vec = db
+                .get_users_chat_count()
+                .iter()
+                .filter(|tup| {
+                    let user_id = tup.0.user_id.to_string();
+                    !exclude_list.contains(&user_id.as_str())
+                })
+                .map(|tup| {
+                    let user = tup.0.clone();
+                    let count = tup.1;
+                    format!(
                         "UserId: {}, GroupId: {}, UserName: {} found in {} groups",
-                        user_id,
-                        ok!(chat_id),
-                        ok!(user_name),
-                        ok!(cnt)
-                    );
-                    vec.push(hit);
-                }
-                true
-            }));
+                        user.user_id, user.chat_id, user.user_name, count
+                    )
+                })
+                .collect::<Vec<_>>();
+
             HResponse::URL(vec)
-        }*/
+        }
         Command::ListUserGroups(id) => {
             let users_vec = db.list_user_groups(chat_id, id);
             let vec = users_vec
@@ -204,24 +205,19 @@ pub fn handle_command(
             get_participants(tdlib, chat_ids);
             HResponse::Text(get_participants_reply)
         }
-        /* Command::FindInactiveUsers(ndays) => {
-            let select = format!("SELECT user_id, user_name, timestamp FROM users WHERE chat_id = {} AND timestamp <= date('now', '-{} day')", chat_id, ndays);
-            let mut vec = Vec::new();
-            ok!(connection.iterate(select, |dbmedia| {
-                let (_, user_id) = dbmedia[0];
-                let (_, user_name) = dbmedia[1];
-                let (_, timestamp) = dbmedia[2];
-                let hit = format!(
-                    "UserId: {}, UserName: {}, Last Update: {}",
-                    ok!(user_id),
-                    ok!(user_name),
-                    ok!(timestamp)
-                );
-                vec.push(hit);
-                true
-            }));
+        Command::FindInactiveUsers(ndays) => {
+            let vec = db
+                .inactive_users_before(ndays)
+                .iter()
+                .map(|user| {
+                    format!(
+                        "UserId: {}, UserName: {}, Last Update: {}",
+                        user.user_id, user.user_name, Utc.timestamp(user.timestamp, 0)
+                    )
+                })
+                .collect::<Vec<_>>();
             HResponse::URL(vec)
-        }*/
+        }
         Command::ListMedia(num) => {
             let media_vec = db.list_media(num.into());
             let vec = media_vec
@@ -250,6 +246,14 @@ pub fn handle_command(
                 .collect::<Vec<_>>();
             log::info!("ListDuplicates: {}", vec.join("\n"));
             HResponse::Text(response_too_long)
+        }
+        Command::GetChatIds => {
+            let vec = db
+                .get_chat_ids()
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>();
+            HResponse::Text(vec.join("\n"))
         }
     };
     Ok(r)

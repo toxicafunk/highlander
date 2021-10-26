@@ -1,5 +1,5 @@
 use rtdlib::types::{
-    Chat, ChatMembers, ChatType, MessageContent, TextEntityType,
+    Chat, ChatMembers, ChatType, MessageContent, MessageSender, TextEntityType,
     UpdateDeleteMessages, UpdateNewMessage,
 };
 use rtdlib::Tdlib;
@@ -11,20 +11,22 @@ use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use tokio::time::{sleep, Duration};
+
 use super::duplicates::extract_last250;
-use super::models::User;
+use super::models::{Group, User};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 const LIMIT: i64 = 200;
 
 pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
-    let mut offset: i64 = 0;
-    let mut supergroup_id: i64 = 0;
-    let mut chat_ids: VecDeque<i64> = VecDeque::new();
+    let mut channel: VecDeque<Group> = VecDeque::new();
     loop {
         match tdlib.receive(5.0) {
             Some(response) => {
+                let tdlib = tdlib.clone();
+                let db = db.clone();
                 //log::info!("Listener Response: {}", response);
                 match serde_json::from_str::<serde_json::Value>(&response[..]) {
                     Ok(v) => {
@@ -113,7 +115,8 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
                             log::info!("Chat: {}", chat_json);
                             let chat: Chat = ok!(serde_json::from_value(chat_json));
                             let chat = chat.clone();
-                            supergroup_id = match chat.type_() {
+                            let chat_id = chat.id();
+                            let supergroup_id = match chat.type_() {
                                 ChatType::BasicGroup(basic) => basic.basic_group_id(),
                                 ChatType::Supergroup(group) => group.supergroup_id(),
                                 ChatType::Private(private) => private.user_id(),
@@ -121,55 +124,105 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
                                 _ => 0,
                             };
 
-                            chat_ids.push_back(supergroup_id);
                             let members_request = serde_json::json!({
                                 "@type": "getSupergroupMembers",
                                 "supergroup_id": supergroup_id,
-                                "offset": offset,
+                                "offset": 0,
                                 "limit": 200
                             });
+
+                            let group = Group {
+                                supergroup_id,
+                                chat_id,
+                                offset: 0,
+                                timestamp: Utc::now().timestamp(),
+                            };
+                            channel.push_back(group);
                             tdlib.send(members_request.to_string().as_str());
+                            sleep(Duration::from_millis(2000)).await;
                         }
 
                         if v["@type"] == "chatMembers" {
                             let members_json = v.clone();
                             log::info!("chatMembers: {}", members_json);
                             match serde_json::from_value::<ChatMembers>(members_json) {
-                                Ok(members) => {
-                                    let total_count = members.total_count();
-                                    let chat_id = chat_ids.pop_front().unwrap();
-                                    log::info!(
-                                        "chatMembers: total {} chat_id {}",
-                                        total_count,
-                                        chat_id
-                                    );
-                                    for member in members.members() {
-                                        let dbuser = User {
-                                            user_id: member.user_id(),
-                                            chat_id,
-                                            user_name: String::default(),
-                                            chat_name: String::default(),
-                                            timestamp: Utc::now().timestamp(),
-                                        };
-                                        if db.chat_dbuser_exists(dbuser.user_id, dbuser.chat_id) {
-                                            log::info!("chatMembers: exists {:?}", dbuser)
-                                        } else {
-                                            log::info!("chatMembers: inserting {:?}", dbuser);
-                                            db.insert_dbuser(dbuser);
-                                        }
-                                    }
+                                Ok(members) => match channel.pop_front() {
+                                    Some(g) => {
+                                        let total_count = members.total_count();
+                                        log::info!(
+                                            "chatMembers: total {} chat_id {} supergroup_id {}",
+                                            total_count,
+                                            g.chat_id,
+                                            g.supergroup_id
+                                        );
+                                        for member in members.members() {
+                                            let dbuser = match member.member_id() {
+                                                Some(MessageSender::User(sender)) => {
+                                                    log::info!("MessageSender:User: {:?}", sender);
+                                                    Some(User {
+                                                        user_id: sender.user_id(),
+                                                        chat_id: g.chat_id,
+                                                        user_name: String::default(),
+                                                        chat_name: String::default(),
+                                                        timestamp: Utc::now().timestamp(),
+                                                    })
+                                                }
+                                                Some(_) => {
+                                                    log::warn!(
+                                                    "chatMembers: This shouldn't have happened!"
+                                                );
+                                                    None
+                                                }
+                                                None => Some(User {
+                                                    user_id: member.user_id().unwrap(),
+                                                    chat_id: g.chat_id,
+                                                    user_name: String::default(),
+                                                    chat_name: String::default(),
+                                                    timestamp: Utc::now().timestamp(),
+                                                }),
+                                            };
 
-                                    if (offset + LIMIT) < total_count {
-                                        offset += LIMIT;
-                                        let members_request = serde_json::json!({
-                                        "@type": "getSupergroupMembers",
-                                        "supergroup_id": supergroup_id,
-                                        "offset": offset,
-                                        "limit": LIMIT
-                                        });
-                                        tdlib.send(members_request.to_string().as_str());
-                                    }
-                                }
+                                            match dbuser {
+                                                None => (),
+                                                Some(user) => {
+                                                    if db.chat_dbuser_exists(
+                                                        user.user_id,
+                                                        user.chat_id,
+                                                    ) {
+                                                        log::info!("chatMembers: exists {:?}", user)
+                                                    } else {
+                                                        log::info!(
+                                                            "chatMembers: inserting {:?}",
+                                                            user
+                                                        );
+                                                        db.insert_dbuser(user);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        let new_offset = g.offset + LIMIT;
+                                        if new_offset < total_count {
+                                            let members_request = serde_json::json!({
+                                            "@type": "getSupergroupMembers",
+                                            "supergroup_id": g.supergroup_id,
+                                            "offset": new_offset,
+                                            "limit": LIMIT
+                                            });
+
+                                            let group = Group {
+                                                supergroup_id: g.supergroup_id,
+                                                chat_id: g.chat_id,
+                                                offset: new_offset,
+                                                timestamp: Utc::now().timestamp()
+                                            };
+                                            channel.push_back(group);
+                                            tdlib.send(members_request.to_string().as_str());
+                                            sleep(Duration::from_millis(2000)).await;
+                                        }
+                                    },
+                                    None => log::error!("Request received but no group on queue")
+                                },
                                 Err(e) => log::error!("Error deserializing ChatMembers: {}", e),
                             }
                         }
