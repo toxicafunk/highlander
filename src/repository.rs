@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, User};
 
-use super::models::{Group, Mapping, Media, SDO};
+use super::models::{Mapping, Media, SDO};
 use super::models::{User as DBUser};
 
 pub trait Repository<T> {
@@ -28,8 +28,6 @@ pub trait Repository<T> {
     fn list_duplicates(&self, limit: usize) -> Vec<Media>;
     fn get_users_chat_count(&self) -> Vec<(DBUser, usize)>;
     fn inactive_users_before(&self, ndays: i64) -> Vec<DBUser>;
-    fn insert_group(&self, group: Group) -> bool;
-    fn get_group(&self, supergroup_id: i64) -> Option<Group>;
 }
 
 #[cfg(test)]

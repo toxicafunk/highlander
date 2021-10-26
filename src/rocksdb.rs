@@ -15,7 +15,7 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Group, Mapping, Media, SDO};
+use super::models::{Mapping, Media, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
@@ -114,8 +114,6 @@ impl Repository<Media> for RocksDBRepo {
         let mut duplicates_opts = Options::default();
         duplicates_opts.set_compaction_filter("ttl_duplicates", media_ttl_filter);
         let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", duplicates_opts);
-        let groups_opts = Options::default();
-        let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -126,8 +124,7 @@ impl Repository<Media> for RocksDBRepo {
             media_descriptor,
             users_descriptor,
             mappings_descriptor,
-            duplicates_descriptor,
-            groups_descriptor
+            duplicates_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -550,47 +547,6 @@ impl Repository<Media> for RocksDBRepo {
             })
             .collect::<Vec<_>>();
         users_vec
-    }
-
-    fn insert_group(&self, group: Group) -> bool {
-        let groups_handle = self.db.cf_handle("groups").unwrap();
-        let k = format!("{}", group.supergroup_id);
-        log::info!("Insert Group key: {}", k);
-        match bincode::serialize(&group) {
-            Err(e) => {
-                log::error!("insert_dbgroup: {}", e);
-                false
-            }
-            Ok(v) => match self.db.put_cf(groups_handle, key(k.as_bytes()), v) {
-                Err(e) => {
-                    log::error!("insert_group: {}", e);
-                    false
-                }
-                Ok(_) => true,
-            },
-        }
-    }
-
-    fn get_group(&self, supergroup_id: i64) -> Option<Group> {
-        let groups_handle = self.db.cf_handle("groups").unwrap();
-        let mut groups_it = self.db.iterator_cf(groups_handle, IteratorMode::Start);
-        match groups_it.find(|(k, _)| {
-            let key = String::from_utf8(k.to_vec()).unwrap();
-            match key.parse::<i64>() {
-                Ok(id) => id == supergroup_id,
-                Err(_) => false
-            }
-
-        }) {
-            Some(group_ser) => {
-                let group: Group = bincode::deserialize(&group_ser.1).unwrap();
-                Some(group)
-            },
-            None => {
-                log::error!("get_group: {} not found", supergroup_id);
-                None
-            }
-        }
     }
 }
 
