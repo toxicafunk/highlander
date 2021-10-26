@@ -33,8 +33,10 @@ pub enum Command {
     ListUserGroups(i64),
     #[command(description = "find all users on multiple groups")]
     GetChatParticipants,
-    #[command(description = "find all users who've remained active over n days")]
+    #[command(description = "find all users who've remained inactive over n days")]
     FindInactiveUsers(i64),
+    #[command(description = "ban all users who've remained inactive over n days")]
+    BanInactiveUsers(i64),
     #[command(description = "find all users on multiple groups")]
     ListMedia(u8),
     #[command(description = "find all users on multiple groups")]
@@ -217,6 +219,10 @@ pub fn handle_command(
                 })
                 .collect::<Vec<_>>();
             HResponse::URL(vec)
+        }
+        Command::BanInactiveUsers(ndays) => {
+            let vec = db.inactive_users_before(ndays);
+            HResponse::Ban(vec)
         }
         Command::ListMedia(num) => {
             let media_vec = db.list_media(num.into());

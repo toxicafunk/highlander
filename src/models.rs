@@ -31,12 +31,6 @@ pub struct SDO {
     pub file_id: Option<String>,
 }
 
-pub enum HResponse {
-    Media(Vec<InputMedia>),
-    URL(Vec<String>),
-    Text(String),
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Media {
     pub unique_id: String,
@@ -77,4 +71,11 @@ pub struct Group {
     pub chat_id: i64,
     pub offset: i64,
     pub timestamp: i64
+}
+
+pub enum HResponse {
+    Ban(Vec<User>),
+    Media(Vec<InputMedia>),
+    URL(Vec<String>),
+    Text(String),
 }
