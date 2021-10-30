@@ -223,7 +223,7 @@ async fn run() {
                                                 }
                                                 HResponse::Ban(users) => {
                                                     let b = users.iter()
-                                                                 .map(|user| ban_user(&cx, user))
+                                                                 .map(|user| ban_user(&cx, message.chat_id(), user))
                                                                  .collect::<Vec<_>>();
                                                     log::info!("Banned {} users", b.len())
                                                 }
@@ -249,9 +249,9 @@ async fn run() {
 
 type Cx = UpdateWithCx<AutoSend<Bot>, Message>;
 
-async fn ban_user(cx: &Cx, user: &DBUser) -> Result<True, RequestError> {
+async fn ban_user(cx: &Cx, chat_id: i64, user: &DBUser) -> Result<True, RequestError> {
     cx.requester
-        .ban_chat_member(user.chat_id, user.user_id)
+        .ban_chat_member(chat_id, user.user_id)
         .until_date(0)
         .await
 }

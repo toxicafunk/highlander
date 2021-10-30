@@ -114,6 +114,9 @@ impl Repository<Media> for RocksDBRepo {
         let mut duplicates_opts = Options::default();
         duplicates_opts.set_compaction_filter("ttl_duplicates", media_ttl_filter);
         let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", duplicates_opts);
+        let groups_opts = Options::default();
+        let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
+
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -124,7 +127,8 @@ impl Repository<Media> for RocksDBRepo {
             media_descriptor,
             users_descriptor,
             mappings_descriptor,
-            duplicates_descriptor
+            duplicates_descriptor,
+            groups_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -199,7 +203,7 @@ impl Repository<Media> for RocksDBRepo {
         }) {
             None => {
                 log::info!(
-                    "item_exists: key {}_{} not found",
+                    "item_exists: not found key {}_{}",
                     sdo.chat.id,
                     sdo.unique_id
                 );
@@ -207,7 +211,7 @@ impl Repository<Media> for RocksDBRepo {
             }
             Some(media_ser) => {
                 let media: Media = bincode::deserialize(&media_ser.1).unwrap();
-                log::info!("item_exists: media {:?} found", media);
+                log::info!("item_exists: found media {:?}", media);
                 Some(media)
             }
         }
@@ -513,7 +517,7 @@ impl Repository<Media> for RocksDBRepo {
         media_vec
     }
 
-    fn get_users_chat_count(&self) -> Vec<(DBUser, usize)> {
+    fn get_users_chat_count(&self, chat_id: i64, num_groups: usize) -> Vec<(DBUser, usize)> {
         let users_handle = self.db.cf_handle("users").unwrap();
         let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);
         let users_vec = users_it
@@ -526,9 +530,13 @@ impl Repository<Media> for RocksDBRepo {
             .map(|(_, g)| {
                 let count = g.len();
                 let user = g.first().unwrap().clone();
-                (user, count)
+                let is_in_chat = g.iter().any(|user| user.chat_id == chat_id);
+                (user, count, is_in_chat)
             })
-            .filter(|tup| tup.1 > 1)
+            .filter(|tup| {
+                tup.1 >= num_groups && tup.2
+            })
+            .map(|tup| (tup.0, tup.1))
             .collect::<Vec<_>>();
         users_vec
     }

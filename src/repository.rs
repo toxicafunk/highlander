@@ -26,7 +26,7 @@ pub trait Repository<T> {
     fn list_media(&self, limit: usize) -> Vec<Media>;
     fn list_users(&self, limit: usize) -> Vec<DBUser>;
     fn list_duplicates(&self, limit: usize) -> Vec<Media>;
-    fn get_users_chat_count(&self) -> Vec<(DBUser, usize)>;
+    fn get_users_chat_count(&self, chat_id: i64, num_groups: usize) -> Vec<(DBUser, usize)>;
     fn inactive_users_before(&self, ndays: i64) -> Vec<DBUser>;
 }
 

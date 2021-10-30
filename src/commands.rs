@@ -10,7 +10,7 @@ use chrono::offset::{TimeZone, Utc};
 
 use std::sync::Arc;
 
-use super::models::HResponse;
+use super::models::{User, HResponse};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
@@ -19,8 +19,10 @@ use super::rocksdb::RocksDBRepo;
 pub enum Command {
     #[command(description = "display this text.")]
     Help,
-    #[command(description = "find users present in multiple groups")]
-    FindInterUsers,
+    #[command(description = "find users present in  more than N groups")]
+    FindInterUsers(usize),
+    #[command(description = "ban all users present in more than N chats")]
+    BanInterUsers(usize),
     #[command(description = "retrieves the last n stored media")]
     LastMediaStored(u8),
     #[command(description = "retrieves the last n stored urls")]
@@ -37,14 +39,16 @@ pub enum Command {
     FindInactiveUsers(i64),
     #[command(description = "ban all users who've remained inactive over n days")]
     BanInactiveUsers(i64),
-    #[command(description = "find all users on multiple groups")]
+    #[command(description = "find all media on multiple groups")]
     ListMedia(u8),
     #[command(description = "find all users on multiple groups")]
     ListUsers(u8),
-    #[command(description = "find all users on multiple groups")]
+    #[command(description = "find all duplicates on multiple groups")]
     ListDuplicates(u8),
     #[command(description = "Get the Ids of all chats managed by highlander")]
     GetChatIds,
+    #[command(description = "Bans the corresponding user to this user id")]
+    BanUser(i64),
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -163,7 +167,7 @@ pub fn handle_command(
                 .collect();
             HResponse::URL(vec)
         }
-        Command::FindInterUsers => {
+        Command::FindInterUsers(num_groups) => {
             let exclude_list: Vec<&str> = vec![
                 "1733079574",
                 "162726413",
@@ -171,10 +175,13 @@ pub fn handle_command(
                 "1042885111",
                 "785731637",
                 "208056682",
+                "634570122",
+                "417753222",
+                "181514"
             ];
 
             let vec = db
-                .get_users_chat_count()
+                .get_users_chat_count(chat_id, num_groups)
                 .iter()
                 .filter(|tup| {
                     let user_id = tup.0.user_id.to_string();
@@ -192,6 +199,31 @@ pub fn handle_command(
 
             HResponse::URL(vec)
         }
+        Command::BanInterUsers(num_groups) => {
+            let exclude_list: Vec<&str> = vec![
+                "1733079574",
+                "162726413",
+                "1575436070",
+                "1042885111",
+                "785731637",
+                "208056682",
+                "634570122",
+                "417753222",
+                "181514"
+            ];
+
+            let vec = db
+                .get_users_chat_count(chat_id, num_groups)
+                .iter()
+                .filter(|tup| {
+                    let user_id = tup.0.user_id.to_string();
+                    !exclude_list.contains(&user_id.as_str())
+                })
+                .map(|tup| tup.0.clone())
+                .collect::<Vec<_>>();
+            HResponse::Ban(vec)
+        }
+
         Command::ListUserGroups(id) => {
             let users_vec = db.list_user_groups(chat_id, id);
             let vec = users_vec
@@ -260,6 +292,16 @@ pub fn handle_command(
                 .map(|i| i.to_string())
                 .collect::<Vec<_>>();
             HResponse::Text(vec.join("\n"))
+        }
+        Command::BanUser(user_id) => {
+            if db.chat_dbuser_exists(user_id, chat_id) {
+                let mut vec = Vec::new();
+                vec.push(User { user_id, chat_id, user_name: String::default(), chat_name: String::default(), timestamp: 0 });
+                HResponse::Ban(vec)
+            } else {
+                let msg = format!("User {} not found on chat {}", user_id, chat_id);
+                HResponse::Text(msg)
+            }
         }
     };
     Ok(r)
