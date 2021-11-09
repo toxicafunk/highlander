@@ -167,17 +167,26 @@ async fn run() {
 
                         let status = detect_duplicates(DB.clone(), &message, user);
                         if is_test_mode || !is_admin {
-                            if status.respond {
+                            let success = if status.action {
+                                let mr = cx.delete_message().await;
+                                match mr {
+                                    Ok(m) => {
+                                        log::info!("Deleted message: {:?}", m);
+                                        true
+                                    },
+                                    Err(e) => {
+                                        log::error!("Error: {:?}", e);
+                                        false
+                                    }
+                                }
+                            } else {
+                                true
+                            };
+
+                            if status.respond && success {
                                 let mr = cx.answer(status.text).await;
                                 match mr {
                                     Ok(m) => log::info!("Responded: {:?}", m),
-                                    Err(e) => log::error!("Error: {:?}", e),
-                                }
-                            }
-                            if status.action {
-                                let mr = cx.delete_message().await;
-                                match mr {
-                                    Ok(m) => log::info!("Deleted message: {:?}", m),
                                     Err(e) => log::error!("Error: {:?}", e),
                                 }
                             }
