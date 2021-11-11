@@ -107,7 +107,11 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) -> () {
                             let update_delete_message = v.clone();
                             let deleted_messages: UpdateDeleteMessages =
                                 ok!(serde_json::from_value(update_delete_message));
-                            db.delete_item(deleted_messages)
+                            if deleted_messages.from_cache() {
+                                log::info!("updateDeleteMessages: Messages deleted from cache only: safely ignore")
+                            } else {
+                                db.delete_item(deleted_messages)
+                            }
                         }
 
                         if v["@type"] == "chat" {
