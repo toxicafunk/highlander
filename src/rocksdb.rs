@@ -15,10 +15,11 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Mapping, Media, SDO};
+use super::models::{Config, Mapping, Media, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
+const DEFAULT_CONFIG: Config = Config { allow_forwards: true, days_blocked: 5 };
 
 #[allow(unused_variables)]
 fn media_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
@@ -116,6 +117,8 @@ impl Repository<Media> for RocksDBRepo {
         let duplicates_descriptor = ColumnFamilyDescriptor::new("duplicates", duplicates_opts);
         let groups_opts = Options::default();
         let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
+        let configs_opts = Options::default();
+        let configs_descriptor = ColumnFamilyDescriptor::new("groups", configs_opts);
 
 
         let mut opts = Options::default();
@@ -128,7 +131,8 @@ impl Repository<Media> for RocksDBRepo {
             users_descriptor,
             mappings_descriptor,
             duplicates_descriptor,
-            groups_descriptor
+            groups_descriptor,
+            configs_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -185,6 +189,47 @@ impl Repository<Media> for RocksDBRepo {
     fn insert_user(&self, user: &User, chat: Arc<Chat>) -> bool {
         log::info!("insert_user: {} on chat {}", user.id, chat.id);
         self.update_user_timestamp(user, chat)
+    }
+
+    fn update_config(&self, config: Config, chat: Arc<Chat>) -> bool {
+        let configs_handle = self.db.cf_handle("configs").unwrap();
+        let k = format!("{}", chat.id);
+        log::info!("Update config key: {}", k);
+        match bincode::serialize(&config) {
+            Err(e) => {
+                log::error!("update_config: {}", e);
+                false
+            }
+            Ok(v) => match self.db.put_cf(configs_handle, key(k.as_bytes()), v) {
+                Err(e) => {
+                    log::error!("update_config: {}", e);
+                    false
+                }
+                Ok(_) => true,
+            },
+        }
+    }
+
+    fn get_config(&self, chat: Arc<Chat>) -> Config {
+        let configs_handle = self.db.cf_handle("configs").unwrap();
+        let chat_id = chat.id.to_string();
+        match self.db.get_cf(configs_handle, chat_id.as_bytes()) {
+            Ok(Some(config_ser)) => match bincode::deserialize(&config_ser) {
+                Err(e) => {
+                    log::error!("Config for {} failed to deserialize: {}", chat_id, e);
+                    DEFAULT_CONFIG
+                },
+                Ok(config) => config
+            },
+            Ok(None) => {
+                log::error!("Config for {} not found", chat_id);
+                DEFAULT_CONFIG
+            }
+            Err(e) => {
+                log::error!("Config for {} could not be retrieved: {}", chat_id, e);
+                DEFAULT_CONFIG
+            }
+        }
     }
 
     #[allow(unused_variables)]

@@ -21,6 +21,8 @@ use log::LevelFilter;
 use pretty_env_logger::env_logger::Builder;
 
 use rtdlib::types::UpdateAuthorizationState;
+use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage};
+use rtdlib::types::RObject;
 use rtdlib::Tdlib;
 
 use highlander::api_listener::tgram_listener;
@@ -111,6 +113,22 @@ fn init_tgram() -> () {
     }
 }
 
+async fn notify_staff(tdlib: Arc<Tdlib>, chat_id: i64, msg_id: i32) {
+    let link = format!("https://t.me/c/{}/{}", chat_id, msg_id);
+    let mut formatted_buider = FormattedText::builder();
+    let mut text_builder = InputMessageText::builder();
+    let mut send_message_builder = SendMessage::builder();
+    let content = InputMessageContent::input_message_text(text_builder.text(formatted_buider.text(link)));
+    send_message_builder.chat_id(1193436037); //-1001193436037
+    send_message_builder.input_message_content(content);
+    let send_message = send_message_builder.build();
+    match send_message.to_json() {
+        Err(e) => log::error!("Failed to convert send_message to json for {} {}\n{}", chat_id, msg_id, e),
+        Ok(msg) => tdlib.send(msg.as_str())
+    }
+}
+
+
 #[tokio::main]
 async fn main() {
     run().await;
@@ -198,7 +216,11 @@ async fn run() {
                         //let bot_name = "ramirez";
 
                         match txt_opt {
-                            Some(txt) => match Command::parse(txt, bot_name) {
+                            Some(txt) => {
+                                if let Some(_) = txt.find("@admin") {
+                                    notify_staff(TDLIB.clone(), message.chat_id(), message.id).await;
+                                }
+                                match Command::parse(txt, bot_name) {
                                 Ok(command) => {
                                     if is_admin {
                                         let cr = handle_command(DB.clone(), TDLIB.clone(), command, message.chat_id());
@@ -244,7 +266,8 @@ async fn run() {
                                     }
                                 }
                                 Err(_) => ()
-                            },
+                            }
+                        },
                             None => ()
                         }
                     }

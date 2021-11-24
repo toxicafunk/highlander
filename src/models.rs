@@ -73,6 +73,12 @@ pub struct Group {
     pub timestamp: i64
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Config {
+    pub allow_forwards: bool,
+    pub days_blocked: i64
+}
+
 pub enum HResponse {
     Ban(Vec<User>),
     Media(Vec<InputMedia>),
