@@ -28,8 +28,8 @@ pub trait Repository<T> {
     fn list_duplicates(&self, limit: usize) -> Vec<Media>;
     fn get_users_chat_count(&self, chat_id: i64, num_groups: usize) -> Vec<(DBUser, usize)>;
     fn inactive_users_before(&self, ndays: i64) -> Vec<DBUser>;
-    fn update_config(&self, config: Config, chat: Arc<Chat>) -> bool;
-    fn get_config(&self, chat: Arc<Chat>) -> Config;
+    fn update_config(&self, config: Config, chat: i64) -> bool;
+    fn get_config(&self, chat: i64) -> Config;
 }
 
 #[cfg(test)]

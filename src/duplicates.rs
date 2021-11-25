@@ -41,7 +41,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                 _ => true,
             };
 
-            let chat_config = db.get_config(chat.clone());
+            let chat_config = db.get_config(chat.id);
             if is_forwarded && !chat_config.allow_forwards {
                 Status { action: false, respond: true, text: String::from("Este canal no permite forwards/reenvios") }
             }

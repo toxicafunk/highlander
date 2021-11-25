@@ -10,12 +10,12 @@ use chrono::offset::{TimeZone, Utc};
 
 use std::sync::Arc;
 
-use super::models::{User, HResponse};
+use super::models::{Config, User, HResponse};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 #[derive(BotCommand)]
-#[command(rename = "lowercase", description = "These commands are supported:")]
+#[command(rename = "lowercase", description = "These commands are supported:", parse_with = "split")]
 pub enum Command {
     #[command(description = "display this text.")]
     Help,
@@ -49,6 +49,10 @@ pub enum Command {
     GetChatIds,
     #[command(description = "Bans the corresponding user to this user id")]
     BanUser(i64),
+    #[command(description = "Sets whether the current group allows any forwards and the number of days to store 'duplicated' messages")]
+    SetConfig(bool, i64),
+    #[command(description = "Retrieves config for the current group")]
+    ShowConfig,
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -302,6 +306,15 @@ pub fn handle_command(
                 let msg = format!("User {} not found on chat {}", user_id, chat_id);
                 HResponse::Text(msg)
             }
+        },
+        Command::SetConfig(allow_forwards, days_blocked) => {
+            let config = Config { allow_forwards: allow_forwards, days_blocked: days_blocked };
+            let success = db.update_config(config, chat_id);
+            HResponse::Text(format!("Config updated: {}", success))
+        },
+        Command::ShowConfig => {
+            let config = db.get_config(chat_id);
+            HResponse::Text(format!("{:?}", config))
         }
     };
     Ok(r)

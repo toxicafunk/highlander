@@ -118,7 +118,7 @@ impl Repository<Media> for RocksDBRepo {
         let groups_opts = Options::default();
         let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
         let configs_opts = Options::default();
-        let configs_descriptor = ColumnFamilyDescriptor::new("groups", configs_opts);
+        let configs_descriptor = ColumnFamilyDescriptor::new("configs", configs_opts);
 
 
         let mut opts = Options::default();
@@ -191,9 +191,9 @@ impl Repository<Media> for RocksDBRepo {
         self.update_user_timestamp(user, chat)
     }
 
-    fn update_config(&self, config: Config, chat: Arc<Chat>) -> bool {
+    fn update_config(&self, config: Config, chat: i64) -> bool {
         let configs_handle = self.db.cf_handle("configs").unwrap();
-        let k = format!("{}", chat.id);
+        let k = format!("{}", chat);
         log::info!("Update config key: {}", k);
         match bincode::serialize(&config) {
             Err(e) => {
@@ -210,9 +210,9 @@ impl Repository<Media> for RocksDBRepo {
         }
     }
 
-    fn get_config(&self, chat: Arc<Chat>) -> Config {
+    fn get_config(&self, chat: i64) -> Config {
         let configs_handle = self.db.cf_handle("configs").unwrap();
-        let chat_id = chat.id.to_string();
+        let chat_id = chat.to_string();
         match self.db.get_cf(configs_handle, chat_id.as_bytes()) {
             Ok(Some(config_ser)) => match bincode::deserialize(&config_ser) {
                 Err(e) => {
