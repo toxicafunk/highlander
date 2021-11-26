@@ -111,11 +111,11 @@ fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&st
     }
 }
 
-fn str_to_option(str: &String) -> Option<&String> {
-    if str == "" {
+fn str_to_option(s: &str) -> Option<&str> {
+    if s.is_empty() {
         None
     } else {
-        Some(str)
+        Some(s)
     }
 }
 
@@ -136,8 +136,8 @@ pub fn handle_command(
             let vec = media_vec
                 .iter()
                 .map(|media| {
-                    let file_id = str_to_option(&media.file_id).map(|s| s.as_str());
-                    let unique_id = str_to_option(&media.unique_id).map(|s| s.as_str());
+                    let file_id = str_to_option(&media.file_id);
+                    let unique_id = str_to_option(&media.unique_id);
                     prepare_input_media(media.file_type.as_str(), file_id, unique_id)
                 })
                 .collect();
@@ -156,8 +156,8 @@ pub fn handle_command(
             let vec = media_vec
                 .iter()
                 .map(|media| {
-                    let file_id = str_to_option(&media.file_id).map(|s| s.as_str());
-                    let unique_id = str_to_option(&media.unique_id).map(|s| s.as_str());
+                    let file_id = str_to_option(&media.file_id);
+                    let unique_id = str_to_option(&media.unique_id);
                     prepare_input_media(media.file_type.as_str(), file_id, unique_id)
                 })
                 .collect();
@@ -299,8 +299,7 @@ pub fn handle_command(
         }
         Command::BanUser(user_id) => {
             if db.chat_dbuser_exists(user_id, chat_id) {
-                let mut vec = Vec::new();
-                vec.push(User { user_id, chat_id, user_name: String::default(), chat_name: String::default(), timestamp: 0 });
+                let vec = vec![User { user_id, chat_id, user_name: String::default(), chat_name: String::default(), timestamp: 0 }];
                 HResponse::Ban(vec)
             } else {
                 let msg = format!("User {} not found on chat {}", user_id, chat_id);
@@ -308,7 +307,7 @@ pub fn handle_command(
             }
         },
         Command::SetConfig(allow_forwards, days_blocked) => {
-            let config = Config { allow_forwards: allow_forwards, days_blocked: days_blocked };
+            let config = Config { allow_forwards, days_blocked };
             let success = db.update_config(config, chat_id);
             HResponse::Text(format!("Config updated: {}", success))
         },

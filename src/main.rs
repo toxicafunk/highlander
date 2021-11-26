@@ -25,9 +25,11 @@ use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMe
 use rtdlib::types::RObject;
 use rtdlib::Tdlib;
 
+use tokio::time::{sleep, Duration};
+
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
-use highlander::duplicates::detect_duplicates;
+use highlander::duplicates::{chat_id_for_link, detect_duplicates};
 use highlander::models::HResponse;
 use highlander::models::User as DBUser;
 use highlander::repository::Repository;
@@ -113,18 +115,24 @@ fn init_tgram() -> () {
     }
 }
 
-async fn notify_staff(tdlib: Arc<Tdlib>, chat_id: i64, msg_id: i32) {
-    let link = format!("https://t.me/c/{}/{}", chat_id, msg_id);
+async fn notify_staff(chat_id: i64, msg_id: i32) {
+    let chat_id_link = chat_id_for_link(chat_id);
+    let link = format!("https://t.me/c/{}/{}", chat_id_link, msg_id);
     let mut formatted_buider = FormattedText::builder();
     let mut text_builder = InputMessageText::builder();
     let mut send_message_builder = SendMessage::builder();
     let content = InputMessageContent::input_message_text(text_builder.text(formatted_buider.text(link)));
-    send_message_builder.chat_id(1193436037); //-1001193436037
+    send_message_builder.chat_id(-1001193436037); //-1001193436037
     send_message_builder.input_message_content(content);
     let send_message = send_message_builder.build();
     match send_message.to_json() {
         Err(e) => log::error!("Failed to convert send_message to json for {} {}\n{}", chat_id, msg_id, e),
-        Ok(msg) => tdlib.send(msg.as_str())
+        Ok(msg) => {
+            log::info!("Sending: {}", msg);
+            TDLIB.send(msg.as_str());
+            sleep(Duration::from_millis(1000)).await;
+            log::info!("Notification sent!")
+        }
     }
 }
 
@@ -218,7 +226,8 @@ async fn run() {
                         match txt_opt {
                             Some(txt) => {
                                 if let Some(_) = txt.find("@admin") {
-                                    notify_staff(TDLIB.clone(), message.chat_id(), message.id).await;
+                                    log::info!("Notificando a admin");
+                                    notify_staff(message.chat_id(), message.id).await;
                                 }
                                 match Command::parse(txt, bot_name) {
                                 Ok(command) => {

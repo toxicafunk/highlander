@@ -34,18 +34,21 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
 
     let r: Status = match kind {
         MessageKind::Common(msg_common) => {
-            let is_forwarded = match msg_common.forward_kind {
+            let is_not_forwarded = matches!(
+                msg_common.forward_kind,
                 Origin(ForwardOrigin {
                     reply_to_message: None,
-                }) => false,
-                _ => true,
-            };
+                })
+            );
 
             let chat_config = db.get_config(chat.id);
-            if is_forwarded && !chat_config.allow_forwards {
-                Status { action: false, respond: true, text: String::from("Este canal no permite forwards/reenvios") }
-            }
-            else {
+            if !is_not_forwarded && !chat_config.allow_forwards {
+                Status {
+                    action: false,
+                    respond: true,
+                    text: String::from("Este canal no permite forwards/reenvios"),
+                }
+            } else {
                 match msg_common.media_kind {
                     MediaKind::Text(text) => {
                         lazy_static! {
@@ -62,7 +65,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                                 chat,
                                 msg_id,
                                 file_type: String::from("url"),
-                                unique_id: unique_id,
+                                unique_id,
                                 file_id: None,
                             };
                             let new_status = handle_message(db.clone(), &status, sdo, "urls");
@@ -114,7 +117,6 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         log::info!("Audio: {:?}", message);
                         let caption = &*audio.caption.unwrap_or(message.id.to_string());
                         status.text = caption.into();
-                        let chat = chat.clone();
                         let sdo = SDO {
                             chat,
                             msg_id,
@@ -130,7 +132,6 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         log::info!("Document: {:?}", message);
                         let caption = &*document.caption.unwrap_or(message.id.to_string());
                         status.text = caption.into();
-                        let chat = chat.clone();
                         let sdo = SDO {
                             chat,
                             msg_id,
@@ -164,7 +165,6 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let caption = &*video.caption.unwrap_or(message.id.to_string());
                         log::info!("Video: {:?}", message);
                         status.text = caption.into();
-                        let chat = chat.clone();
                         let sdo = SDO {
                             chat,
                             msg_id,
@@ -180,7 +180,6 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         log::info!("Voice: {:?}", message);
                         let caption = &*voice.caption.unwrap_or(message.id.to_string());
                         status.text = caption.into();
-                        let chat = chat.clone();
                         let sdo = SDO {
                             chat,
                             msg_id,
@@ -196,11 +195,11 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     }
                 }
             }
-        },
+        }
         MessageKind::NewChatMembers(new_chat_members) => {
             log::info!("NewChatMembers: {:?}", new_chat_members);
             status
-        },
+        }
         _ => {
             log::info!("Not interesting");
             status
@@ -224,6 +223,13 @@ fn store_user(db: RocksDBRepo, user: &User, chat: Arc<Chat>) -> bool {
     }
 }
 
+pub fn chat_id_for_link(chat_id: i64) -> i64 {
+    match chat_id.to_string().strip_prefix("-100") {
+        Some(s) => s.parse::<i64>().unwrap_or(chat_id),
+        None => 0,
+    }
+}
+
 fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Status {
     let is_media = table == "media";
     match db.item_exists(sdo.clone(), is_media) {
@@ -236,10 +242,7 @@ fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Statu
             log::info!("duplicate media: {:?}", media);
             let chat_id = media.chat_id;
             db.insert_duplicate(sdo);
-            let orig_chat_id = match chat_id.to_string().strip_prefix("-100") {
-                Some(s) => s.parse::<i64>().unwrap_or(chat_id),
-                None => 0,
-            };
+            let orig_chat_id = chat_id_for_link(chat_id);
             let orig_msg_id = media.msg_id;
             log::info!("orginal {} - {}", orig_chat_id, orig_msg_id);
             Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }

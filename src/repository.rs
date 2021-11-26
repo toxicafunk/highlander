@@ -15,7 +15,7 @@ pub trait Repository<T> {
     fn item_exists(&self, sdo: SDO, is_media: bool) -> Option<T>;
     fn insert_item(&self, sdo: SDO, is_media: bool) -> bool;
     fn insert_duplicate(&self, sdo: SDO) -> bool;
-    fn delete_item(&self, deleted_messages: UpdateDeleteMessages) -> ();
+    fn delete_item(&self, deleted_messages: UpdateDeleteMessages);
     fn insert_mapping(&self, api_id: i64, chat_id: i64, unique_id: &str) -> bool;
     fn find_mapping(&self, api_id: i64, chat_id: i64) -> Option<Mapping>;
     fn last_media_stored(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;

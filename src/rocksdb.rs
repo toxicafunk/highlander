@@ -222,7 +222,7 @@ impl Repository<Media> for RocksDBRepo {
                 Ok(config) => config
             },
             Ok(None) => {
-                log::error!("Config for {} not found", chat_id);
+                log::warn!("Config for {} not found, using default config {:?}", chat_id, DEFAULT_CONFIG);
                 DEFAULT_CONFIG
             }
             Err(e) => {
@@ -312,7 +312,7 @@ impl Repository<Media> for RocksDBRepo {
         }
     }
 
-    fn delete_item(&self, deleted_messages: UpdateDeleteMessages) -> () {
+    fn delete_item(&self, deleted_messages: UpdateDeleteMessages) {
         let media_handle = self.db.cf_handle("media").unwrap();
         let chat_id = deleted_messages.chat_id();
         for api_id in deleted_messages.message_ids() {
