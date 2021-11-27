@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use teloxide::prelude::*;
 use teloxide::types::ForwardKind::*;
-use teloxide::types::{Chat, ForwardOrigin, MediaKind, MessageKind, User};
+use teloxide::types::{Chat, ForwardNonChannel, ForwardOrigin, MediaKind, MessageKind, User};
 
 use crate::models::*;
 use crate::repository::Repository;
@@ -34,15 +34,19 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
 
     let r: Status = match kind {
         MessageKind::Common(msg_common) => {
-            let is_not_forwarded = matches!(
-                msg_common.forward_kind,
+            log::info!("{:?}", msg_common);
+            let is_forwarded = match msg_common.forward_kind {
                 Origin(ForwardOrigin {
-                    reply_to_message: None,
-                })
-            );
+                    reply_to_message: _,
+                }) => false,
+                NonChannel(ForwardNonChannel{date:_, from: _}) => false,
+                _ => true
+            };
 
             let chat_config = db.get_config(chat.id);
-            if !is_not_forwarded && !chat_config.allow_forwards {
+            log::info!("is forwarded: {} group allows forwards: {}", is_forwarded, chat_config.allow_forwards);
+
+            if is_forwarded && !chat_config.allow_forwards {
                 Status {
                     action: false,
                     respond: true,
