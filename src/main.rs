@@ -117,7 +117,7 @@ fn init_tgram() -> () {
 
 async fn notify_staff(chat_id: i64, msg_id: i32) {
     let chat_id_link = chat_id_for_link(chat_id);
-    let link = format!("https://t.me/c/{}/{}", chat_id_link, msg_id);
+    let link = format!("Se requiere intervencion de un `admin`: https://t.me/c/{}/{}", chat_id_link, msg_id);
     let mut formatted_buider = FormattedText::builder();
     let mut text_builder = InputMessageText::builder();
     let mut send_message_builder = SendMessage::builder();

@@ -47,10 +47,11 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
             log::info!("is forwarded: {} group allows forwards: {}", is_forwarded, chat_config.allow_forwards);
 
             if is_forwarded && !chat_config.allow_forwards {
+                let user_name = user.username.as_ref().unwrap_or(&user.first_name);
                 Status {
                     action: false,
                     respond: true,
-                    text: String::from("Este canal no permite forwards/reenvios"),
+                    text: format!("Este canal no permite forwards/reenvios @{}", user_name),
                 }
             } else {
                 match msg_common.media_kind {
