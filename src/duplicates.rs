@@ -7,7 +7,11 @@ use teloxide::prelude::*;
 use teloxide::types::ForwardKind::*;
 use teloxide::types::{Chat, ForwardNonChannel, ForwardOrigin, MediaKind, MessageKind, User};
 
-use crate::models::*;
+use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage};
+use rtdlib::Tdlib;
+use rtdlib::types::RObject;
+
+use crate::models::{Status, SDO};
 use crate::repository::Repository;
 use crate::rocksdb::RocksDBRepo;
 
@@ -17,7 +21,18 @@ pub fn extract_last250(text: &str) -> &str {
     text.get(i..l).unwrap_or("")
 }
 
-pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Status {
+pub fn build_message(tmplt: String, target_id: i64) -> SendMessage {
+    let mut formatted_buider = FormattedText::builder();
+    let mut text_builder = InputMessageText::builder();
+    let mut send_message_builder = SendMessage::builder();
+    let content =
+        InputMessageContent::input_message_text(text_builder.text(formatted_buider.text(tmplt)));
+    send_message_builder.chat_id(target_id); //-1001193436037
+    send_message_builder.input_message_content(content);
+    send_message_builder.build()
+}
+
+pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, user: &User) -> Status {
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
@@ -35,21 +50,24 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
     let r: Status = match kind {
         MessageKind::Common(msg_common) => {
             log::info!("{:?}", msg_common);
-            let is_forwarded = match msg_common.forward_kind {
+            let is_forwarded = !matches!(
+                msg_common.forward_kind,
                 Origin(ForwardOrigin {
                     reply_to_message: _,
-                }) => false,
-                NonChannel(ForwardNonChannel{date:_, from: _}) => false,
-                _ => true
-            };
+                }) | NonChannel(ForwardNonChannel { date: _, from: _ })
+            );
 
             let chat_config = db.get_config(chat.id);
-            log::info!("is forwarded: {} group allows forwards: {}", is_forwarded, chat_config.allow_forwards);
+            log::info!(
+                "is forwarded: {} group allows forwards: {}",
+                is_forwarded,
+                chat_config.allow_forwards
+            );
 
             if is_forwarded && !chat_config.allow_forwards {
                 let user_name = user.username.as_ref().unwrap_or(&user.first_name);
                 Status {
-                    action: false,
+                    action: true,
                     respond: true,
                     text: format!("Este canal no permite forwards/reenvios @{}", user_name),
                 }
@@ -120,7 +138,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let file_unique_id = audio.audio.file_unique_id;
                         let file_id = audio.audio.file_id;
                         log::info!("Audio: {:?}", message);
-                        let caption = &*audio.caption.unwrap_or(message.id.to_string());
+                        let caption = &*audio.caption.unwrap_or_else(|| message.id.to_string());
                         status.text = caption.into();
                         let sdo = SDO {
                             chat,
@@ -135,7 +153,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let file_unique_id = document.document.file_unique_id;
                         let file_id = document.document.file_id;
                         log::info!("Document: {:?}", message);
-                        let caption = &*document.caption.unwrap_or(message.id.to_string());
+                        let caption = &*document.caption.unwrap_or_else(|| message.id.to_string());
                         status.text = caption.into();
                         let sdo = SDO {
                             chat,
@@ -148,7 +166,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     }
                     MediaKind::Photo(photo) => {
                         log::info!("Photo: {:?}", message);
-                        let caption = &*photo.caption.unwrap_or(message.id.to_string());
+                        let caption = &*photo.caption.unwrap_or_else(|| message.id.to_string());
                         status.text = caption.into();
                         photo.photo.iter().fold(status, |acc, p| {
                             let file_unique_id = &*p.file_unique_id;
@@ -167,7 +185,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     MediaKind::Video(video) => {
                         let file_unique_id = video.video.file_unique_id;
                         let file_id = video.video.file_id;
-                        let caption = &*video.caption.unwrap_or(message.id.to_string());
+                        let caption = &*video.caption.unwrap_or_else(|| message.id.to_string());
                         log::info!("Video: {:?}", message);
                         status.text = caption.into();
                         let sdo = SDO {
@@ -183,7 +201,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let file_unique_id = voice.voice.file_unique_id;
                         let file_id = voice.voice.file_id;
                         log::info!("Voice: {:?}", message);
-                        let caption = &*voice.caption.unwrap_or(message.id.to_string());
+                        let caption = &*voice.caption.unwrap_or_else(|| message.id.to_string());
                         status.text = caption.into();
                         let sdo = SDO {
                             chat,
@@ -193,6 +211,28 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                             file_id: Some(file_id),
                         };
                         handle_message(db, &status, sdo, "media")
+                    }
+                    MediaKind::Location(location) => {
+                        let target = location.location;
+                        log::info!("{:?}", target);
+
+                        let chat_id_link = chat_id_for_link(chat.id);
+                        let tmplt = format!("Es la ubicacion https://t.me/c/{}/{} covidiana? Responda '1' (SI) o '0' (NO)", chat_id_link, msg_id);
+                        let send_message = build_message(tmplt, user.id);
+                        match send_message.to_json() {
+                            Err(e) => log::error!(
+                                "Failed to convert send_message to json for {} {}\n{}",
+                                chat.id,
+                                msg_id,
+                                e
+                            ),
+                            Ok(msg) => {
+                                log::info!("Sending: {}", msg);
+                                tdlib.send(msg.as_str());
+                                log::info!("Notification sent!")
+                            }
+                        }
+                        status
                     }
                     _ => {
                         log::info!("Other attachment");
@@ -214,7 +254,6 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
 }
 
 fn store_user(db: RocksDBRepo, user: &User, chat: Arc<Chat>) -> bool {
-    let chat = chat.clone();
     if db.chat_user_exists(user, chat.clone()) {
         log::info!("store_user: user {} exists on chat {}", user.id, chat.id);
         db.update_user_timestamp(user, chat)

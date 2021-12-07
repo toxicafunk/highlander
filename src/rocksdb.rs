@@ -84,7 +84,7 @@ fn sdo_to_media(sdo: SDO) -> Media {
         chat_id: sdo.chat.id,
         msg_id: sdo.msg_id,
         file_type: sdo.file_type,
-        file_id: sdo.file_id.unwrap_or("".into()),
+        file_id: sdo.file_id.unwrap_or_else(|| "".into()),
         timestamp: Utc::now().timestamp(),
     }
 }

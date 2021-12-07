@@ -21,15 +21,14 @@ use log::LevelFilter;
 use pretty_env_logger::env_logger::Builder;
 
 use rtdlib::types::UpdateAuthorizationState;
-use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage};
-use rtdlib::types::RObject;
 use rtdlib::Tdlib;
+use rtdlib::types::RObject;
 
 use tokio::time::{sleep, Duration};
 
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
-use highlander::duplicates::{chat_id_for_link, detect_duplicates};
+use highlander::duplicates::{build_message, chat_id_for_link, detect_duplicates};
 use highlander::models::HResponse;
 use highlander::models::User as DBUser;
 use highlander::repository::Repository;
@@ -118,13 +117,7 @@ fn init_tgram() -> () {
 async fn notify_staff(chat_id: i64, msg_id: i32) {
     let chat_id_link = chat_id_for_link(chat_id);
     let link = format!("Se requiere intervencion de un `admin`: https://t.me/c/{}/{}", chat_id_link, msg_id);
-    let mut formatted_buider = FormattedText::builder();
-    let mut text_builder = InputMessageText::builder();
-    let mut send_message_builder = SendMessage::builder();
-    let content = InputMessageContent::input_message_text(text_builder.text(formatted_buider.text(link)));
-    send_message_builder.chat_id(-1001193436037); //-1001193436037
-    send_message_builder.input_message_content(content);
-    let send_message = send_message_builder.build();
+    let send_message =  build_message(link, -1001193436037);
     match send_message.to_json() {
         Err(e) => log::error!("Failed to convert send_message to json for {} {}\n{}", chat_id, msg_id, e),
         Ok(msg) => {
@@ -191,7 +184,7 @@ async fn run() {
                             _ => false,
                         };
 
-                        let status = detect_duplicates(DB.clone(), &message, user);
+                        let status = detect_duplicates(DB.clone(), TDLIB.clone(), &message, user);
                         if is_test_mode || !is_admin {
                             let success = if status.action {
                                 let mr = cx.delete_message().await;
