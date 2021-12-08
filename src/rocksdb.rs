@@ -19,7 +19,7 @@ use super::models::{Config, Mapping, Media, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
-const DEFAULT_CONFIG: Config = Config { allow_forwards: true, days_blocked: 5 };
+const DEFAULT_CONFIG: Config = Config { allow_forwards: true, block_non_latin: false, days_blocked: 5 };
 
 #[allow(unused_variables)]
 fn media_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {

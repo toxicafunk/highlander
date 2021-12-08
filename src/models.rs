@@ -76,6 +76,7 @@ pub struct Group {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     pub allow_forwards: bool,
+    pub block_non_latin: bool,
     pub days_blocked: i64
 }
 

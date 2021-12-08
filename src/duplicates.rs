@@ -40,6 +40,8 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
 
     store_user(db.clone(), user, chat.clone());
 
+    let user_name = user.username.as_ref().unwrap_or(&user.first_name);
+
     let success = "Media will be unique for 5 days";
     let mut status = Status {
         action: false,
@@ -65,7 +67,6 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
             );
 
             if is_forwarded && !chat_config.allow_forwards {
-                let user_name = user.username.as_ref().unwrap_or(&user.first_name);
                 Status {
                     action: true,
                     respond: true,
@@ -305,8 +306,14 @@ mod tests {
     const T3: &str =
         "https://drive.google.com/file/d/1t3_HeKZDIMEJl5_Y_l7uuIt4IeebCN7e/view?usp=sharing";
 
+
+    const AN1:&str = "ࡅߊ‌‌ࡅߺ߳ߊ‌‌ܝܝ݅ܝߊ‌‌";
+    const AN2: &str = "نـٖٖـۘۘ℘ـʘ͜͡اتـٖٖـۘۘ℘ـʘ͜͡اشـٖٖـۘۘ℘ـʘ͜͡";
+    const LN1: &str = "sJavierGrau12!#";
+
     lazy_static! {
         static ref RE: Regex = ok!(Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?"));
+        static ref NONLATIN: Regex = ok!(Regex::new("[^\u{0000}-\u{024F}]+"));
     }
 
     #[test]
@@ -350,5 +357,20 @@ mod tests {
         }
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn non_latin_chars() {
+        let nons1 = NONLATIN.is_match(AN1);
+        println!("{:?}", nons1);
+        assert_eq!(nons1, true);
+
+        let nons2 = NONLATIN.is_match(AN2);
+        println!("{:?}", nons2);
+        assert_eq!(nons2, true);
+
+        let yays1 = NONLATIN.is_match(LN1);
+        println!("{:?}", yays1);
+        assert_eq!(yays1, false)
     }
 }

@@ -50,8 +50,8 @@ pub enum Command {
     GetChatIds,
     #[command(description = "Bans the corresponding user to this user id")]
     BanUser(i64),
-    #[command(description = "Sets whether the current group allows any forwards and the number of days to store 'duplicated' messages")]
-    SetConfig(bool, i64),
+    #[command(description = "Sets whether the current group allows any forwards, blocks non-latin characters in names and the number of days to store 'duplicated' messages")]
+    SetConfig(bool, bool, i64),
     #[command(description = "Retrieves config for the current group")]
     ShowConfig,
 }
@@ -308,8 +308,8 @@ pub fn handle_command(
                 HResponse::Text(msg)
             }
         },
-        Command::SetConfig(allow_forwards, days_blocked) => {
-            let config = Config { allow_forwards, days_blocked };
+        Command::SetConfig(allow_forwards, block_non_latin, days_blocked) => {
+            let config = Config { allow_forwards, block_non_latin, days_blocked };
             let success = db.update_config(config, chat_id);
             HResponse::Text(format!("Config updated: {}", success))
         },

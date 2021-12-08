@@ -1,8 +1,9 @@
 use rtdlib::types::{
-    Chat, ChatMembers, ChatType, MessageContent, MessageSender, TextEntityType,
-    UpdateDeleteMessages, UpdateNewMessage,
+    Chat, ChatMembers, ChatType, MessageChatDeleteMember, MessageContent, MessageSender,
+    TextEntityType, UpdateDeleteMessages, UpdateNewMessage,
 };
 use rtdlib::Tdlib;
+use rtdlib::types::RObject;
 
 use chrono::offset::Utc;
 use lazy_static::lazy_static;
@@ -85,6 +86,30 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 let unique_id =
                                     message_voice_note.voice_note().voice().remote().unique_id();
                                 db.insert_mapping(id, chat_id, unique_id);
+                            }
+                            MessageContent::MessageChatJoinByLink(_) => {
+                                let user = message.sender().as_user();
+                                match user {
+                                    None => log::info!("Weird... a chat just joined by link!"),
+                                    Some(usr) => {
+                                        let ban_user_id = usr.user_id();
+                                        let mut chat_delete_builder =
+                                            MessageChatDeleteMember::builder();
+                                        chat_delete_builder.user_id(ban_user_id);
+                                        let delete_member = chat_delete_builder.build();
+                                        match delete_member.to_json() {
+                                            Err(e) => log::error!(
+                                                "Failed to convert delete_member to json\n{}",
+                                                e
+                                            ),
+                                            Ok(json) => {
+                                                log::info!("Sending: {}", json);
+                                                tdlib.send(json.as_str());
+                                                log::info!("Delete sent!")
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             _ => (),
                         }
