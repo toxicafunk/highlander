@@ -1,6 +1,6 @@
 use rtdlib::types::{
     Chat, ChatMembers, ChatType, MessageChatDeleteMember, MessageContent, MessageSender,
-    TextEntityType, UpdateDeleteMessages, UpdateNewMessage,
+    TextEntityType, UpdateDeleteMessages, UpdateNewMessage, UpdateNewCallbackQuery
 };
 use rtdlib::Tdlib;
 use rtdlib::types::RObject;
@@ -13,6 +13,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
+
+use bincode;
 
 use super::duplicates::extract_last250;
 use super::models::{Group, User};
@@ -30,7 +32,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
             //log::info!("Listener Response: {}", response);
             match serde_json::from_str::<serde_json::Value>(&response[..]) {
                 Ok(v) => {
-                    //log::info!("General Listener Value: {}", v);
+                    log::info!("General Listener Value: {}", v);
                     if v["@type"] == "updateNewMessage" {
                         log::info!("New Message Listener Value: {}", v);
                         let update_new_message = v.clone();
@@ -111,7 +113,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                     }
                                 }
                             }
-                            _ => (),
+                            _ => log::info!("Unknown type: {:?}", message),
                         }
                     }
 
@@ -236,6 +238,20 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 None => log::error!("Request received but no group on queue"),
                             },
                             Err(e) => log::error!("Error deserializing ChatMembers: {}", e),
+                        }
+                    }
+
+                    if v["@type"] == "updateNewCallbackQuery" {
+                        log::info!("Payload Data Listener Value: {}", v);
+                        let callback_query_message = v.clone();
+                        let callback_query: UpdateNewCallbackQuery =
+                            ok!(serde_json::from_value(callback_query_message));
+                        let data = callback_query.payload();
+                        let payload_data = data.as_data().unwrap();
+                        let data = payload_data.data().as_bytes();
+                        match bincode::deserialize::<String>(&data) {
+                            Err(e) => log::error!("Failed to deserialize payload data:\n{}", e),
+                            Ok(d) => log::info!("Payload data: {}", d)
                         }
                     }
                 }

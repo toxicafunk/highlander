@@ -1,5 +1,5 @@
 use teloxide::types::Chat;
-use teloxide::types::InputMedia;
+use teloxide::types::{InputMedia, ReplyMarkup};
 
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ pub struct Status {
     pub action: bool,
     pub respond: bool,
     pub text: String,
+    pub reply_markup: Option<ReplyMarkup>
 }
 
 impl Status {
@@ -18,6 +19,7 @@ impl Status {
             action: status.action,
             respond: status.respond,
             text: status.text.clone(),
+            reply_markup: None
         }
     }
 }

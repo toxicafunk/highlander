@@ -2,7 +2,7 @@
 mod macros;
 
 use teloxide::prelude::*;
-use teloxide::types::{ChatMember, ChatMemberStatus, True};
+use teloxide::types::{ChatMemberStatus, True};
 use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
 
@@ -20,9 +20,9 @@ use lazy_static::lazy_static;
 use log::LevelFilter;
 use pretty_env_logger::env_logger::Builder;
 
+use rtdlib::types::RObject;
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
-use rtdlib::types::RObject;
 
 use tokio::time::{sleep, Duration};
 
@@ -116,10 +116,18 @@ fn init_tgram() -> () {
 
 async fn notify_staff(chat_id: i64, msg_id: i32) {
     let chat_id_link = chat_id_for_link(chat_id);
-    let link = format!("Se requiere intervencion de un `admin`: https://t.me/c/{}/{}", chat_id_link, msg_id);
-    let send_message =  build_message(link, -1001193436037);
+    let link = format!(
+        "Se requiere intervencion de un `admin`: https://t.me/c/{}/{}",
+        chat_id_link, msg_id
+    );
+    let send_message = build_message(link, -1001193436037);
     match send_message.to_json() {
-        Err(e) => log::error!("Failed to convert send_message to json for {} {}\n{}", chat_id, msg_id, e),
+        Err(e) => log::error!(
+            "Failed to convert send_message to json for {} {}\n{}",
+            chat_id,
+            msg_id,
+            e
+        ),
         Ok(msg) => {
             log::info!("Sending: {}", msg);
             TDLIB.send(msg.as_str());
@@ -128,7 +136,6 @@ async fn notify_staff(chat_id: i64, msg_id: i32) {
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() {
@@ -176,15 +183,16 @@ async fn run() {
                 match message.from() {
                     Some(user) => {
                         // Handle normal messages
-                        let member: ChatMember =
-                            ok!(cx.requester.get_chat_member(message.chat.id, user.id).await);
-                        let is_admin = match member.status() {
-                            ChatMemberStatus::Administrator => true,
-                            ChatMemberStatus::Owner => true,
-                            _ => false,
+                        let is_admin = match cx.requester.get_chat_member(message.chat.id, user.id).await {
+                            Ok(member) => match member.status() {
+                                ChatMemberStatus::Administrator => true,
+                                ChatMemberStatus::Owner => true,
+                                _ => false,
+                            },
+                            Err(_) => false
                         };
 
-                        let status = detect_duplicates(DB.clone(), TDLIB.clone(), &message, user);
+                        let status = detect_duplicates(DB.clone(), &message, user);
                         if is_test_mode || !is_admin {
                             let success = if status.action {
                                 let mr = cx.delete_message().await;
@@ -203,7 +211,10 @@ async fn run() {
                             };
 
                             if status.respond && success {
-                                let mr = cx.answer(status.text).await;
+                                let mr = match status.reply_markup {
+                                    None => cx.answer(status.text).await,
+                                    Some(mrkup) => cx.answer(status.text).reply_markup(mrkup).send().await
+                                };
                                 match mr {
                                     Ok(m) => log::info!("Responded: {:?}", m),
                                     Err(e) => log::error!("Error: {:?}", e),

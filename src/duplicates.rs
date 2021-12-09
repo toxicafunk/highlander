@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 use teloxide::prelude::*;
 use teloxide::types::ForwardKind::*;
-use teloxide::types::{Chat, ForwardNonChannel, ForwardOrigin, MediaKind, MessageKind, User};
+use teloxide::types::{Chat, ForwardNonChannel, ForwardOrigin, MediaKind, MessageKind, User,
+                      InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardButtonKind, ReplyMarkup};
 
-use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage};
-use rtdlib::Tdlib;
-use rtdlib::types::RObject;
+use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage,
+                    /*ReplyMarkupInlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonType, InlineKeyboardButtonTypeCallback*/};
+//use rtdlib::Tdlib;
+//use rtdlib::types::RObject;
 
 use crate::models::{Status, SDO};
 use crate::repository::Repository;
@@ -32,7 +34,7 @@ pub fn build_message(tmplt: String, target_id: i64) -> SendMessage {
     send_message_builder.build()
 }
 
-pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, user: &User) -> Status {
+pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Status {
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
@@ -47,6 +49,7 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
         action: false,
         respond: false,
         text: success.to_string(),
+        reply_markup: None
     };
 
     let r: Status = match kind {
@@ -71,6 +74,7 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
                     action: true,
                     respond: true,
                     text: format!("Este canal no permite forwards/reenvios @{}", user_name),
+                    reply_markup: None
                 }
             } else {
                 match msg_common.media_kind {
@@ -216,9 +220,35 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
                     MediaKind::Location(location) => {
                         let target = location.location;
                         log::info!("{:?}", target);
+                        let coords = format!("{}{}", target.longitude, target.latitude);
 
+                        /*
                         let chat_id_link = chat_id_for_link(chat.id);
-                        let tmplt = format!("Es la ubicacion https://t.me/c/{}/{} covidiana? Responda '1' (SI) o '0' (NO)", chat_id_link, msg_id);
+                        let mut callback_covidiano_builder = InlineKeyboardButtonTypeCallback::builder();
+                        callback_covidiano_builder.data(format!("{}:1", coords));
+                        let callback_covidiano = callback_covidiano_builder.build();
+
+                        let mut callback_despierto_builder = InlineKeyboardButtonTypeCallback::builder();
+                        callback_despierto_builder.data(format!("{}:0", coords));
+                        let callback_despierto = callback_despierto_builder.build();
+
+                        let mut covidiano_btn_builder = InlineKeyboardButton::builder();
+                        covidiano_btn_builder.text(String::from("Si"));
+                        covidiano_btn_builder.type_(InlineKeyboardButtonType::Callback(callback_covidiano));
+
+                        let mut despierto_btn_builder = InlineKeyboardButton::builder();
+                        despierto_btn_builder.text(String::from("No"));
+                        despierto_btn_builder.type_(InlineKeyboardButtonType::Callback(callback_despierto));
+
+                        let covidiano_btn = covidiano_btn_builder.build();
+                        let despierto_btn = despierto_btn_builder.build();
+
+                        let buttons = vec!(covidiano_btn, despierto_btn);
+
+                        let mut reply_markup_builder = ReplyMarkupInlineKeyboard::builder();
+                        reply_markup_builder.rows(vec!(buttons));
+                        let reply_markup = reply_markup_builder.build();
+
                         let send_message = build_message(tmplt, user.id);
                         match send_message.to_json() {
                             Err(e) => log::error!(
@@ -232,7 +262,16 @@ pub fn detect_duplicates(db: RocksDBRepo, tdlib: Arc<Tdlib>, message: &Message, 
                                 tdlib.send(msg.as_str());
                                 log::info!("Notification sent!")
                             }
-                        }
+                        }*/
+
+                        let covidiano_btn = InlineKeyboardButton { text: String::from("Covidiana"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords))};
+                        let despierto_btn = InlineKeyboardButton { text: String::from("Despierta"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords))};
+                        let buttons = vec!(covidiano_btn, despierto_btn);
+                        let reply_mrkup = InlineKeyboardMarkup { inline_keyboard:  vec!(buttons) };
+                        let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
+                        status.text = String::from("Es esta ubicacion covidiana?");
+                        status.respond = true;
+                        status.reply_markup = Some(reply);
                         status
                     }
                     _ => {
@@ -290,7 +329,8 @@ fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Statu
             let orig_chat_id = chat_id_for_link(chat_id);
             let orig_msg_id = media.msg_id;
             log::info!("orginal {} - {}", orig_chat_id, orig_msg_id);
-            Status { action: true, respond: true, text: format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id) }
+            let dup_msg = format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id);
+            Status { action: true, respond: true, text: dup_msg, reply_markup: None }
         }
     }
 }
