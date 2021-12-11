@@ -1,9 +1,9 @@
+use rtdlib::types::RObject;
 use rtdlib::types::{
     Chat, ChatMembers, ChatType, MessageChatDeleteMember, MessageContent, MessageSender,
-    TextEntityType, UpdateDeleteMessages, UpdateNewMessage, UpdateNewCallbackQuery
+    TextEntityType, UpdateDeleteMessages, UpdateNewCallbackQuery, UpdateNewMessage,
 };
 use rtdlib::Tdlib;
-use rtdlib::types::RObject;
 
 use chrono::offset::Utc;
 use lazy_static::lazy_static;
@@ -29,12 +29,12 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
         if let Some(response) = tdlib.receive(5.0) {
             let tdlib = tdlib.clone();
             let db = db.clone();
-            //log::info!("Listener Response: {}", response);
+            log::info!("Listener Response: {}", response);
             match serde_json::from_str::<serde_json::Value>(&response[..]) {
                 Ok(v) => {
-                    log::info!("General Listener Value: {}", v);
+                    //log::info!("General Listener Value: {}", v);
                     if v["@type"] == "updateNewMessage" {
-                        log::info!("New Message Listener Value: {}", v);
+                        //log::info!("New Message Listener Value: {}", v);
                         let update_new_message = v.clone();
                         let new_messages: UpdateNewMessage =
                             ok!(serde_json::from_value(update_new_message));
@@ -176,29 +176,17 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                     );
                                     for member in members.members() {
                                         let dbuser = match member.member_id() {
-                                            Some(MessageSender::User(sender)) => {
-                                                log::info!("MessageSender:User: {:?}", sender);
+                                            MessageSender::User(sender_user) => {
+                                                log::info!("MessageSender:User: {:?}", sender_user);
                                                 Some(User {
-                                                    user_id: sender.user_id(),
+                                                    user_id: sender_user.user_id(),
                                                     chat_id: g.chat_id,
                                                     user_name: String::default(),
                                                     chat_name: String::default(),
                                                     timestamp: Utc::now().timestamp(),
                                                 })
                                             }
-                                            Some(_) => {
-                                                log::warn!(
-                                                    "chatMembers: This shouldn't have happened!"
-                                                );
-                                                None
-                                            }
-                                            None => Some(User {
-                                                user_id: member.user_id().unwrap(),
-                                                chat_id: g.chat_id,
-                                                user_name: String::default(),
-                                                chat_name: String::default(),
-                                                timestamp: Utc::now().timestamp(),
-                                            }),
+                                            _ => None,
                                         };
 
                                         match dbuser {
@@ -244,14 +232,23 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                     if v["@type"] == "updateNewCallbackQuery" {
                         log::info!("Payload Data Listener Value: {}", v);
                         let callback_query_message = v.clone();
-                        let callback_query: UpdateNewCallbackQuery =
-                            ok!(serde_json::from_value(callback_query_message));
-                        let data = callback_query.payload();
-                        let payload_data = data.as_data().unwrap();
-                        let data = payload_data.data().as_bytes();
-                        match bincode::deserialize::<String>(&data) {
-                            Err(e) => log::error!("Failed to deserialize payload data:\n{}", e),
-                            Ok(d) => log::info!("Payload data: {}", d)
+                        match serde_json::from_value::<UpdateNewCallbackQuery>(
+                            callback_query_message,
+                        ) {
+                            Ok(callback_query) => {
+                                let data = callback_query.payload();
+                                let payload_data = data.as_data().unwrap();
+                                let data = payload_data.data().as_bytes();
+                                match bincode::deserialize::<String>(&data) {
+                                    Err(e) => {
+                                        log::error!("Failed to deserialize payload data:\n{}", e)
+                                    }
+                                    Ok(d) => log::info!("Payload data: {}", d),
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to unmarshall callback query json\n{}", e)
+                            }
                         }
                     }
                 }

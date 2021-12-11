@@ -220,7 +220,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     MediaKind::Location(location) => {
                         let target = location.location;
                         log::info!("{:?}", target);
-                        let coords = format!("{}{}", target.longitude, target.latitude);
+                        let coords = format!("{}_{}", target.longitude, target.latitude);
 
                         /*
                         let chat_id_link = chat_id_for_link(chat.id);
