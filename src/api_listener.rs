@@ -1,9 +1,11 @@
 use rtdlib::types::RObject;
 use rtdlib::types::{
-    Chat, ChatMembers, ChatType, MessageChatDeleteMember, MessageContent, MessageSender,
-    TextEntityType, UpdateDeleteMessages, UpdateNewCallbackQuery, UpdateNewMessage,
+    AnswerInlineQuery, BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
+    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewCallbackQuery,
+    UpdateNewMessage,
 };
 use rtdlib::Tdlib;
+use std::str;
 
 use chrono::offset::Utc;
 use lazy_static::lazy_static;
@@ -13,8 +15,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
-
-use bincode;
 
 use super::duplicates::extract_last250;
 use super::models::{Group, User};
@@ -91,23 +91,33 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                             }
                             MessageContent::MessageChatJoinByLink(_) => {
                                 let user = message.sender().as_user();
-                                match user {
-                                    None => log::info!("Weird... a chat just joined by link!"),
-                                    Some(usr) => {
-                                        let ban_user_id = usr.user_id();
-                                        let mut chat_delete_builder =
-                                            MessageChatDeleteMember::builder();
-                                        chat_delete_builder.user_id(ban_user_id);
-                                        let delete_member = chat_delete_builder.build();
-                                        match delete_member.to_json() {
-                                            Err(e) => log::error!(
-                                                "Failed to convert delete_member to json\n{}",
-                                                e
-                                            ),
-                                            Ok(json) => {
-                                                log::info!("Sending: {}", json);
-                                                tdlib.send(json.as_str());
-                                                log::info!("Delete sent!")
+                                let chat_id = message.chat_id();
+                                let chat_config = db.get_config(chat_id);
+                                if chat_config.block_non_latin {
+                                    match user {
+                                        None => log::info!("Weird... a chat just joined by link!"),
+                                        Some(usr) => {
+                                            let ban_user_id = usr.user_id();
+                                            let mut sender_builder = MessageSenderUser::builder();
+                                            sender_builder.user_id(ban_user_id);
+                                            let sender =
+                                                MessageSender::User(sender_builder.build());
+                                            let mut ban_member_builder = BanChatMember::builder();
+                                            ban_member_builder.chat_id(chat_id);
+                                            ban_member_builder.member_id(sender);
+                                            ban_member_builder.banned_until_date(0);
+                                            ban_member_builder.revoke_messages(true);
+                                            let ban_member = ban_member_builder.build();
+                                            match ban_member.to_json() {
+                                                Err(e) => log::error!(
+                                                    "Failed to convert delete_member to json\n{}",
+                                                    e
+                                                ),
+                                                Ok(json) => {
+                                                    log::info!("Sending: {}", json);
+                                                    tdlib.send(json.as_str());
+                                                    log::info!("Delete sent!")
+                                                }
                                             }
                                         }
                                     }
@@ -239,11 +249,31 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 let data = callback_query.payload();
                                 let payload_data = data.as_data().unwrap();
                                 let data = payload_data.data().as_bytes();
-                                match bincode::deserialize::<String>(&data) {
+                                match base64::decode(&data) {
                                     Err(e) => {
                                         log::error!("Failed to deserialize payload data:\n{}", e)
                                     }
-                                    Ok(d) => log::info!("Payload data: {}", d),
+                                    Ok(d) => {
+                                        if let Ok(s) = str::from_utf8(&d) {
+                                            log::info!("Payload data: {}", s);
+                                            let mut answer_builder = AnswerInlineQuery::builder();
+                                            answer_builder.inline_query_id(callback_query.id().parse::<isize>().unwrap());
+                                            answer_builder.is_personal(false);
+                                            answer_builder.results(Vec::new());
+                                            answer_builder.next_offset("");
+                                            let answer = answer_builder.build();
+                                            match answer.to_json() {
+                                                Err(e) => log::error!(
+                                                    "Failed to convert delete_member to json\n{}",
+                                                    e
+                                                ),
+                                                Ok(json) => {
+                                                    log::info!("Answering: {:?}", json);
+                                                    tdlib.send(json.as_str());
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -255,5 +285,18 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                 Err(e) => log::error!("Error: {}", e),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str;
+    #[test]
+    fn decode_string_64() {
+        let b64 = "LTAuNDIyODMyXzM4LjM5MjM0NTox";
+        let decoded = base64::decode(b64).unwrap();
+        let decoded_str = str::from_utf8(&decoded).unwrap();
+        println!("Decoded: {:?} -> {}", decoded, decoded_str);
+        assert_eq!(decoded_str, "-0.422832_38.392345:1")
     }
 }
