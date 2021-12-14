@@ -1,11 +1,11 @@
 use rtdlib::types::RObject;
 use rtdlib::types::{
-    AnswerInlineQuery, BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
-    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewCallbackQuery,
-    UpdateNewMessage,
+    BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
+    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewMessage,
+    //AnswerInlineQuery, UpdateNewCallbackQuery
 };
 use rtdlib::Tdlib;
-use std::str;
+//use std::str;
 
 use chrono::offset::Utc;
 use lazy_static::lazy_static;
@@ -239,7 +239,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                         }
                     }
 
-                    if v["@type"] == "updateNewCallbackQuery" {
+                    /*if v["@type"] == "updateNewCallbackQuery" {
                         log::info!("Payload Data Listener Value: {}", v);
                         let callback_query_message = v.clone();
                         match serde_json::from_value::<UpdateNewCallbackQuery>(
@@ -280,7 +280,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 log::error!("Failed to unmarshall callback query json\n{}", e)
                             }
                         }
-                    }
+                    }*/
                 }
                 Err(e) => log::error!("Error: {}", e),
             }

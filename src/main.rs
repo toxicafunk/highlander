@@ -288,8 +288,22 @@ async fn run() {
                 }
             })
         })
+        .callback_queries_handler(handle_callback_query)
         .dispatch()
         .await;
+}
+
+async fn handle_callback_query(rx: DispatcherHandlerRx<AutoSend<Bot>, CallbackQuery>) {
+   UnboundedReceiverStream::new(rx)
+   .for_each_concurrent(None, |cx| async move {
+      handle_callback(cx).await
+    })
+   .await;
+}
+
+async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
+    let query = &cx.update;
+    log::info!("Callback: {:?}", query)
 }
 
 type Cx = UpdateWithCx<AutoSend<Bot>, Message>;

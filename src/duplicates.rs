@@ -217,53 +217,15 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         };
                         handle_message(db, &status, sdo, "media")
                     }
+                    MediaKind::Venue(venue) => {
+                        let target = venue;
+                        log::info!("LOCATION: {:?}", target);
+                        status
+                    }
                     MediaKind::Location(location) => {
                         let target = location.location;
-                        log::info!("{:?}", target);
+                        log::info!("LOCATION: {:?}", target);
                         let coords = format!("{}_{}", target.longitude, target.latitude);
-
-                        /*
-                        let chat_id_link = chat_id_for_link(chat.id);
-                        let mut callback_covidiano_builder = InlineKeyboardButtonTypeCallback::builder();
-                        callback_covidiano_builder.data(format!("{}:1", coords));
-                        let callback_covidiano = callback_covidiano_builder.build();
-
-                        let mut callback_despierto_builder = InlineKeyboardButtonTypeCallback::builder();
-                        callback_despierto_builder.data(format!("{}:0", coords));
-                        let callback_despierto = callback_despierto_builder.build();
-
-                        let mut covidiano_btn_builder = InlineKeyboardButton::builder();
-                        covidiano_btn_builder.text(String::from("Si"));
-                        covidiano_btn_builder.type_(InlineKeyboardButtonType::Callback(callback_covidiano));
-
-                        let mut despierto_btn_builder = InlineKeyboardButton::builder();
-                        despierto_btn_builder.text(String::from("No"));
-                        despierto_btn_builder.type_(InlineKeyboardButtonType::Callback(callback_despierto));
-
-                        let covidiano_btn = covidiano_btn_builder.build();
-                        let despierto_btn = despierto_btn_builder.build();
-
-                        let buttons = vec!(covidiano_btn, despierto_btn);
-
-                        let mut reply_markup_builder = ReplyMarkupInlineKeyboard::builder();
-                        reply_markup_builder.rows(vec!(buttons));
-                        let reply_markup = reply_markup_builder.build();
-
-                        let send_message = build_message(tmplt, user.id);
-                        match send_message.to_json() {
-                            Err(e) => log::error!(
-                                "Failed to convert send_message to json for {} {}\n{}",
-                                chat.id,
-                                msg_id,
-                                e
-                            ),
-                            Ok(msg) => {
-                                log::info!("Sending: {}", msg);
-                                tdlib.send(msg.as_str());
-                                log::info!("Notification sent!")
-                            }
-                        }*/
-
                         let covidiano_btn = InlineKeyboardButton { text: String::from("Covidiana"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords))};
                         let despierto_btn = InlineKeyboardButton { text: String::from("Despierta"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords))};
                         let buttons = vec!(covidiano_btn, despierto_btn);
