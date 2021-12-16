@@ -82,6 +82,16 @@ pub struct Config {
     pub days_blocked: i64
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Local {
+    pub latitude: f32,
+    pub longitude: f32,
+    pub name: String,
+    pub address: String,
+    pub yays: i32,
+    pub nays: i32
+}
+
 pub enum HResponse {
     Ban(Vec<User>),
     Media(Vec<InputMedia>),

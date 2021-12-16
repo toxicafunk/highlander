@@ -1,11 +1,9 @@
 use rtdlib::types::RObject;
 use rtdlib::types::{
-    BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
-    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewMessage,
-    //AnswerInlineQuery, UpdateNewCallbackQuery
+    BanChatMember, Chat, ChatMembers, ChatType, Location, MessageContent, MessageSender,
+    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewMessage
 };
 use rtdlib::Tdlib;
-//use std::str;
 
 use chrono::offset::Utc;
 use lazy_static::lazy_static;
@@ -17,11 +15,16 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 use super::duplicates::extract_last250;
-use super::models::{Group, User};
+use super::models::{Group, Local, User};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 const LIMIT: i64 = 200;
+
+fn store_local(db: RocksDBRepo, location: &Location, name: String, address: String) -> bool {
+    let local = Local { latitude: location.latitude(), longitude: location.longitude(), name, address, yays: 0, nays: 0 };
+    db.insert_local(local)
+}
 
 pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
     let mut channel: VecDeque<Group> = VecDeque::new();
@@ -29,7 +32,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
         if let Some(response) = tdlib.receive(5.0) {
             let tdlib = tdlib.clone();
             let db = db.clone();
-            log::info!("Listener Response: {}", response);
+            //log::info!("Listener Response: {}", response);
             match serde_json::from_str::<serde_json::Value>(&response[..]) {
                 Ok(v) => {
                     //log::info!("General Listener Value: {}", v);
@@ -122,6 +125,22 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                         }
                                     }
                                 }
+                            }
+                            MessageContent::MessageVenue(message_venue) => {
+                                log::info!("Venue: {:?}", message_venue);
+                                let venue = message_venue.venue();
+                                let location = venue.location();
+                                let name = venue.title();
+                                let address = venue.address();
+                                if !store_local(db.clone(), location, name.to_string(), address.to_string()) {
+                                    log::error!("Failed to store location for {:?}", venue)
+                                }
+                            }
+                            MessageContent::MessageLocation(message_location) => {
+                                log::info!("Location: {:?}", message_location);
+                                let location = message_location.location();
+                                let locals = db.find_local_by_coords(location.latitude(), location.longitude());
+                                log::info!("{:?}", locals)
                             }
                             _ => log::info!("Unknown type: {:?}", message),
                         }
@@ -238,49 +257,6 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                             Err(e) => log::error!("Error deserializing ChatMembers: {}", e),
                         }
                     }
-
-                    /*if v["@type"] == "updateNewCallbackQuery" {
-                        log::info!("Payload Data Listener Value: {}", v);
-                        let callback_query_message = v.clone();
-                        match serde_json::from_value::<UpdateNewCallbackQuery>(
-                            callback_query_message,
-                        ) {
-                            Ok(callback_query) => {
-                                let data = callback_query.payload();
-                                let payload_data = data.as_data().unwrap();
-                                let data = payload_data.data().as_bytes();
-                                match base64::decode(&data) {
-                                    Err(e) => {
-                                        log::error!("Failed to deserialize payload data:\n{}", e)
-                                    }
-                                    Ok(d) => {
-                                        if let Ok(s) = str::from_utf8(&d) {
-                                            log::info!("Payload data: {}", s);
-                                            let mut answer_builder = AnswerInlineQuery::builder();
-                                            answer_builder.inline_query_id(callback_query.id().parse::<isize>().unwrap());
-                                            answer_builder.is_personal(false);
-                                            answer_builder.results(Vec::new());
-                                            answer_builder.next_offset("");
-                                            let answer = answer_builder.build();
-                                            match answer.to_json() {
-                                                Err(e) => log::error!(
-                                                    "Failed to convert delete_member to json\n{}",
-                                                    e
-                                                ),
-                                                Ok(json) => {
-                                                    log::info!("Answering: {:?}", json);
-                                                    tdlib.send(json.as_str());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Failed to unmarshall callback query json\n{}", e)
-                            }
-                        }
-                    }*/
                 }
                 Err(e) => log::error!("Error: {}", e),
             }

@@ -15,7 +15,7 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Config, Mapping, Media, SDO};
+use super::models::{Config, Local, Mapping, Media, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
@@ -119,6 +119,8 @@ impl Repository<Media> for RocksDBRepo {
         let groups_descriptor = ColumnFamilyDescriptor::new("groups", groups_opts);
         let configs_opts = Options::default();
         let configs_descriptor = ColumnFamilyDescriptor::new("configs", configs_opts);
+        let locals_opts = Options::default();
+        let locals_descriptor = ColumnFamilyDescriptor::new("locals", locals_opts);
 
 
         let mut opts = Options::default();
@@ -132,7 +134,8 @@ impl Repository<Media> for RocksDBRepo {
             mappings_descriptor,
             duplicates_descriptor,
             groups_descriptor,
-            configs_descriptor
+            configs_descriptor,
+            locals_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -601,6 +604,77 @@ impl Repository<Media> for RocksDBRepo {
             .collect::<Vec<_>>();
         users_vec
     }
+
+    fn insert_local(&self, local: Local) -> bool {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        match bincode::serialize(&local) {
+            Err(e) => {
+                log::error!("insert_local: {}", e);
+                false
+            }
+            Ok(media_ser) => {
+                let k = format!("{}_{}", local.latitude, local.longitude);
+                match self.db.put_cf(locals_handle, key(k.as_bytes()), media_ser) {
+                    Err(e) => {
+                        log::error!("insert_local: {}", e);
+                        false
+                    }
+                    Ok(_) => {
+                        log::info!("insert_local: {}", k);
+                        true
+                    }
+                }
+            }
+        }
+
+    }
+
+    fn find_local_by_coords(&self, latitude: f32, longitude: f32) -> Vec<Local> {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+            .filter(|(k_ser, _)| {
+                let key = String::from_utf8(k_ser.to_vec()).unwrap();
+                let local: Vec<&str> = key.split("_").collect();
+                is_within_meters(local[0].parse::<f32>().unwrap(), local[1].parse::<f32>().unwrap(), latitude, longitude, 1000_f32)
+            })
+            .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
+            .collect::<Vec<_>>()
+    }
+
+    fn find_local_by_name(&self, name: String) -> Vec<Local> {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+            .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
+            .filter(|local| local.name.to_lowercase().contains(&name.to_lowercase()))
+            .collect::<Vec<_>>()
+    }
+
+    fn find_local_by_address(&self, address: String) -> Vec<Local> {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+            .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
+            .filter(|local| local.address.to_lowercase().contains(&address.to_lowercase()))
+            .collect::<Vec<_>>()
+    }
+}
+
+//Earth’s radius, sphere
+const EARTH_RADIUS_METERS: f32 = 6378137_f32;
+
+fn is_within_meters(local_lat: f32, local_lon: f32, cur_lat: f32, cur_lon: f32, offset: f32) -> bool {
+    let local_lat_rad = local_lat.to_radians();
+    let cur_lat_rad = cur_lat.to_radians();
+
+    let delta_lat = (local_lat - cur_lat).to_radians();
+    let delta_lon = (local_lon - cur_lon).to_radians();
+
+    let central_angle_inner = (delta_lat / 2.0).sin().powi(2) + cur_lat_rad.cos()
+        * local_lat_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+    let central_angle = 2.0 * central_angle_inner.sqrt().asin();
+
+    let distance = EARTH_RADIUS_METERS * central_angle;
+    log::info!("Distance between current point and local: {}", distance);
+    distance <= offset
 }
 
 #[cfg(test)]

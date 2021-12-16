@@ -38,7 +38,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
-    //log::info!("Message received: {:?}", message);
+    log::info!("Message received: {:?}", message);
 
     store_user(db.clone(), user, chat.clone());
 
@@ -54,7 +54,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
 
     let r: Status = match kind {
         MessageKind::Common(msg_common) => {
-            log::info!("{:?}", msg_common);
+            //log::info!("{:?}", msg_common);
             let is_forwarded = !matches!(
                 msg_common.forward_kind,
                 Origin(ForwardOrigin {
@@ -219,13 +219,13 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     }
                     MediaKind::Venue(venue) => {
                         let target = venue;
-                        log::info!("LOCATION: {:?}", target);
+                        log::info!("VENUE: {:?}", target);
                         status
                     }
                     MediaKind::Location(location) => {
                         let target = location.location;
                         log::info!("LOCATION: {:?}", target);
-                        let coords = format!("{}_{}", target.longitude, target.latitude);
+                        let coords = format!("{}_{}", target.latitude, target.longitude);
                         let covidiano_btn = InlineKeyboardButton { text: String::from("Covidiana"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords))};
                         let despierto_btn = InlineKeyboardButton { text: String::from("Despierta"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords))};
                         let buttons = vec!(covidiano_btn, despierto_btn);

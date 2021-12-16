@@ -294,16 +294,31 @@ async fn run() {
 }
 
 async fn handle_callback_query(rx: DispatcherHandlerRx<AutoSend<Bot>, CallbackQuery>) {
-   UnboundedReceiverStream::new(rx)
-   .for_each_concurrent(None, |cx| async move {
-      handle_callback(cx).await
-    })
-   .await;
+    UnboundedReceiverStream::new(rx)
+        .for_each_concurrent(None, |cx| async move { handle_callback(cx).await })
+        .await;
 }
 
 async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
     let query = &cx.update;
-    log::info!("Callback: {:?}", query)
+    log::info!("Callback: {:?}", query);
+    let query_id = &query.id;
+    let user_id = query.from.id;
+    let message_id = query.message.as_ref().unwrap().id;
+    let msg = match &query.data {
+        None => String::from("Error No data"),
+        Some(data) => data.to_string()
+    };
+    match cx
+        .requester
+        .answer_callback_query(query_id)
+        .text(&msg)
+        .send()
+        .await
+    {
+        Err(_) => log::error!("Error handle_message {}", &msg),
+        _ => log::info!("{}", msg),
+    }
 }
 
 type Cx = UpdateWithCx<AutoSend<Bot>, Message>;
