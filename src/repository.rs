@@ -31,7 +31,8 @@ pub trait Repository<T> {
     fn update_config(&self, config: Config, chat: i64) -> bool;
     fn get_config(&self, chat: i64) -> Config;
     fn insert_local(&self, local: Local) -> bool;
-    fn find_local_by_coords(&self, latitude: f32, longitude: f32) -> Vec<Local>;
+    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<Local>;
+    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<Local>;
     fn find_local_by_name(&self, name: String) -> Vec<Local>;
     fn find_local_by_address(&self, address: String) -> Vec<Local>;
 }

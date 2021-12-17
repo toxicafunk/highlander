@@ -629,13 +629,17 @@ impl Repository<Media> for RocksDBRepo {
 
     }
 
-    fn find_local_by_coords(&self, latitude: f32, longitude: f32) -> Vec<Local> {
+    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<Local> {
+        self.find_nearby_by_coords(latitude, longitude, 1_f64)
+    }
+
+    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<Local> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
         self.db.iterator_cf(locals_handle, IteratorMode::Start)
             .filter(|(k_ser, _)| {
                 let key = String::from_utf8(k_ser.to_vec()).unwrap();
                 let local: Vec<&str> = key.split("_").collect();
-                is_within_meters(local[0].parse::<f32>().unwrap(), local[1].parse::<f32>().unwrap(), latitude, longitude, 1000_f32)
+                is_within_meters(local[0].parse::<f64>().unwrap(), local[1].parse::<f64>().unwrap(), latitude, longitude, offset)
             })
             .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
             .collect::<Vec<_>>()
@@ -659,9 +663,9 @@ impl Repository<Media> for RocksDBRepo {
 }
 
 //Earth’s radius, sphere
-const EARTH_RADIUS_METERS: f32 = 6378137_f32;
+const EARTH_RADIUS_METERS: f64 = 6378137_f64;
 
-fn is_within_meters(local_lat: f32, local_lon: f32, cur_lat: f32, cur_lon: f32, offset: f32) -> bool {
+fn is_within_meters(local_lat: f64, local_lon: f64, cur_lat: f64, cur_lon: f64, offset: f64) -> bool {
     let local_lat_rad = local_lat.to_radians();
     let cur_lat_rad = cur_lat.to_radians();
 

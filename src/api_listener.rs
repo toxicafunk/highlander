@@ -22,7 +22,7 @@ use super::rocksdb::RocksDBRepo;
 const LIMIT: i64 = 200;
 
 fn store_local(db: RocksDBRepo, location: &Location, name: String, address: String) -> bool {
-    let local = Local { latitude: location.latitude(), longitude: location.longitude(), name, address, yays: 0, nays: 0 };
+    let local = Local { latitude: location.latitude() as f64, longitude: location.longitude() as f64, name, address, yays: 0, nays: 0 };
     db.insert_local(local)
 }
 
@@ -138,9 +138,9 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                             }
                             MessageContent::MessageLocation(message_location) => {
                                 log::info!("Location: {:?}", message_location);
-                                let location = message_location.location();
-                                let locals = db.find_local_by_coords(location.latitude(), location.longitude());
-                                log::info!("{:?}", locals)
+                                /*let location = message_location.location();
+                                let locals = db.find_local_by_coords(location.latitude() as f64, location.longitude() as f64);
+                                log::info!("{:?}", locals)*/
                             }
                             _ => log::info!("Unknown type: {:?}", message),
                         }

@@ -29,7 +29,7 @@ use tokio::time::{sleep, Duration};
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
 use highlander::duplicates::{build_message, chat_id_for_link, detect_duplicates};
-use highlander::models::HResponse;
+use highlander::models::{HResponse, Local as HLocal};
 use highlander::models::User as DBUser;
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
@@ -305,20 +305,38 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
     let query_id = &query.id;
     let user_id = query.from.id;
     let message_id = query.message.as_ref().unwrap().id;
-    let msg = match &query.data {
+    let data = match &query.data {
         None => String::from("Error No data"),
-        Some(data) => data.to_string()
+        Some(d) => d.to_string(),
     };
+
+    let parts: Vec<&str> = data.split(":").collect();
+    let coords: Vec<&str> = parts[0].split("_").collect();
+    let vote: u16 = parts[1].parse().unwrap();
+    let locals: Vec<HLocal> = DB.find_local_by_coords(coords[0].parse::<f64>().unwrap(), coords[1].parse::<f64>().unwrap());
+    let yay = if vote == 1 { 1 } else { 0 };
+    let nay = if vote == 0 { 1 } else { 0 };
+    let local = HLocal::new(&locals[0], yay, nay);
+    let success = DB.insert_local(local);
+
     match cx
         .requester
         .answer_callback_query(query_id)
-        .text(&msg)
+        .text(format!("Voto contabilizado: {}", success))
         .send()
         .await
     {
-        Err(_) => log::error!("Error handle_message {}", &msg),
-        _ => log::info!("{}", msg),
+        Err(e) => log::error!("Error handle_message {}\n{}", &data, e),
+        _ => log::info!("{}", data),
     }
+
+    match cx.requester
+        .edit_message_text(user_id, message_id, format!("Voto contabilizado!"))
+        .send()
+        .await {
+            Err(e) => log::error!("Error edit_message {}", e),
+            _ => log::info!("Great!")
+        }
 }
 
 type Cx = UpdateWithCx<AutoSend<Bot>, Message>;

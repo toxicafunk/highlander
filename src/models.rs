@@ -84,12 +84,25 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Local {
-    pub latitude: f32,
-    pub longitude: f32,
+    pub latitude: f64,
+    pub longitude: f64,
     pub name: String,
     pub address: String,
-    pub yays: i32,
-    pub nays: i32
+    pub yays: u16,
+    pub nays: u16
+}
+
+impl Local {
+    pub fn new(local: &Local, yay: u16, nay: u16) -> Self {
+        Self {
+            latitude: local.latitude,
+            longitude: local.longitude,
+            name: local.name.clone(),
+            address: local.address.clone(),
+            yays: local.yays + yay,
+            nays: local.nays + nay
+        }
+    }
 }
 
 pub enum HResponse {

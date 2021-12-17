@@ -5,13 +5,20 @@ use std::sync::Arc;
 
 use teloxide::prelude::*;
 use teloxide::types::ForwardKind::*;
-use teloxide::types::{Chat, ForwardNonChannel, ForwardOrigin, MediaKind, MessageKind, User,
-                      InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardButtonKind, ReplyMarkup};
+use teloxide::types::{
+    Chat, ForwardNonChannel, ForwardOrigin, InlineKeyboardButton, InlineKeyboardButtonKind,
+    InlineKeyboardMarkup, MediaKind, MessageKind, ReplyMarkup, User,
+};
 
-use rtdlib::types::{FormattedText, InputMessageContent, InputMessageText, SendMessage,
-                    /*ReplyMarkupInlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonType, InlineKeyboardButtonTypeCallback*/};
+use rtdlib::types::{
+    FormattedText, InputMessageContent, InputMessageText,
+    SendMessage,
+    /*ReplyMarkupInlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonType, InlineKeyboardButtonTypeCallback*/
+};
 //use rtdlib::Tdlib;
 //use rtdlib::types::RObject;
+
+use std::{thread, time};
 
 use crate::models::{Status, SDO};
 use crate::repository::Repository;
@@ -49,7 +56,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
         action: false,
         respond: false,
         text: success.to_string(),
-        reply_markup: None
+        reply_markup: None,
     };
 
     let r: Status = match kind {
@@ -74,7 +81,7 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                     action: true,
                     respond: true,
                     text: format!("Este canal no permite forwards/reenvios @{}", user_name),
-                    reply_markup: None
+                    reply_markup: None,
                 }
             } else {
                 match msg_common.media_kind {
@@ -226,12 +233,36 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let target = location.location;
                         log::info!("LOCATION: {:?}", target);
                         let coords = format!("{}_{}", target.latitude, target.longitude);
-                        let covidiano_btn = InlineKeyboardButton { text: String::from("Covidiana"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords))};
-                        let despierto_btn = InlineKeyboardButton { text: String::from("Despierta"),  kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords))};
-                        let buttons = vec!(covidiano_btn, despierto_btn);
-                        let reply_mrkup = InlineKeyboardMarkup { inline_keyboard:  vec!(buttons) };
+                        thread::sleep(time::Duration::from_millis(1000));
+                        let locals = db.find_local_by_coords(target.latitude, target.longitude);
+
+                        let covidiano_btn = InlineKeyboardButton {
+                            text: String::from("Covidiana"),
+                            kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords)),
+                        };
+                        let despierto_btn = InlineKeyboardButton {
+                            text: String::from("Despierta"),
+                            kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords)),
+                        };
+                        let buttons = vec![covidiano_btn, despierto_btn];
+                        let reply_mrkup = InlineKeyboardMarkup {
+                            inline_keyboard: vec![buttons],
+                        };
                         let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
-                        status.text = String::from("Es esta ubicacion covidiana?");
+
+                        if locals.len() > 0 {
+                            let res = locals
+                                .iter()
+                                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos. Tu que opinas?",
+                                     local.name, local.address, local.yays, local.nays))
+                                .collect::<Vec<_>>();
+                            status.text = res.join("\n");
+                        } else {
+                            status.text = String::from(
+                                "Local NO ha sido reportado. Es esta ubicacion covidiana?",
+                            );
+                        }
+
                         status.respond = true;
                         status.reply_markup = Some(reply);
                         status
@@ -292,7 +323,12 @@ fn handle_message(db: RocksDBRepo, acc: &Status, sdo: SDO, table: &str) -> Statu
             let orig_msg_id = media.msg_id;
             log::info!("orginal {} - {}", orig_chat_id, orig_msg_id);
             let dup_msg = format!("Mensaje Duplicado: {} ya se ha compartido en los ultimos 5 dias.\nVer mensaje original: https://t.me/c/{}/{}", table, orig_chat_id, orig_msg_id);
-            Status { action: true, respond: true, text: dup_msg, reply_markup: None }
+            Status {
+                action: true,
+                respond: true,
+                text: dup_msg,
+                reply_markup: None,
+            }
         }
     }
 }
@@ -308,8 +344,7 @@ mod tests {
     const T3: &str =
         "https://drive.google.com/file/d/1t3_HeKZDIMEJl5_Y_l7uuIt4IeebCN7e/view?usp=sharing";
 
-
-    const AN1:&str = "ࡅߊ‌‌ࡅߺ߳ߊ‌‌ܝܝ݅ܝߊ‌‌";
+    const AN1: &str = "ࡅߊ‌‌ࡅߺ߳ߊ‌‌ܝܝ݅ܝߊ‌‌";
     const AN2: &str = "نـٖٖـۘۘ℘ـʘ͜͡اتـٖٖـۘۘ℘ـʘ͜͡اشـٖٖـۘۘ℘ـʘ͜͡";
     const LN1: &str = "sJavierGrau12!#";
 
