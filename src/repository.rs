@@ -3,8 +3,33 @@ use std::sync::Arc;
 use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, User};
 
-use super::models::{Config, Mapping, Media, SDO, Local};
-use super::models::{User as DBUser};
+use super::models::User as DBUser;
+use super::models::{Config, Local, Mapping, Media, SDO};
+
+//Earth’s radius, sphere
+const EARTH_RADIUS_METERS: f64 = 6378137_f64;
+
+pub fn is_within_meters(
+    local_lat: f64,
+    local_lon: f64,
+    cur_lat: f64,
+    cur_lon: f64,
+    offset: f64,
+) -> bool {
+    let local_lat_rad = local_lat.to_radians();
+    let cur_lat_rad = cur_lat.to_radians();
+
+    let delta_lat = (local_lat - cur_lat).to_radians();
+    let delta_lon = (local_lon - cur_lon).to_radians();
+
+    let central_angle_inner = (delta_lat / 2.0).sin().powi(2)
+        + cur_lat_rad.cos() * local_lat_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+    let central_angle = 2.0 * central_angle_inner.sqrt().asin();
+
+    let distance = EARTH_RADIUS_METERS * central_angle;
+    log::info!("Distance between current point and local: {}", distance);
+    distance <= offset
+}
 
 pub trait Repository<T> {
     fn init() -> Self;
@@ -44,7 +69,7 @@ mod tests {
     use bincode;
     use chrono::offset::Utc;
     use chrono::Duration;
-    use rocksdb::{ColumnFamilyDescriptor, CompactionDecision, Options, DB, SliceTransform};
+    use rocksdb::{ColumnFamilyDescriptor, CompactionDecision, Options, SliceTransform, DB};
 
     fn create_media(unique_id: &str, chat_id: i64, days_offset: i64) -> Media {
         let tmspt = Utc::now() - Duration::days(days_offset);
@@ -233,7 +258,7 @@ mod tests {
             db.compact_range_cf(&cf1, None::<&[u8]>, None::<&[u8]>);
 
             let mut chat2_it = db.prefix_iterator_cf(cf1, b"-1001592783264");
-            let r = chat2_it.find(|(k,_)| {
+            let r = chat2_it.find(|(k, _)| {
                 let key = String::from_utf8(k.to_vec()).unwrap();
                 key.get(15..).unwrap() == "AQADiq4xG--XSQr3"
             });
@@ -246,5 +271,4 @@ mod tests {
         }
         let _ = DB::destroy(&Options::default(), path);
     }
-
 }

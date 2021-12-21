@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use mut_static::MutStatic;
 use regex::Regex;
 
 use std::sync::Arc;
@@ -10,9 +11,7 @@ use teloxide::types::{
     InlineKeyboardMarkup, MediaKind, MessageKind, ReplyMarkup, User,
 };
 
-use rtdlib::types::{
-    FormattedText, InputMessageContent, InputMessageText,
-    SendMessage,
+use rtdlib::types::{ FormattedText, InputMessageContent, InputMessageText, SendMessage,
     /*ReplyMarkupInlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonType, InlineKeyboardButtonTypeCallback*/
 };
 //use rtdlib::Tdlib;
@@ -20,9 +19,16 @@ use rtdlib::types::{
 
 use std::{thread, time};
 
-use crate::models::{Status, SDO};
-use crate::repository::Repository;
+use tokio::sync::broadcast;
+use tokio::sync::broadcast::{Receiver, Sender};
+
+use crate::models::{ChanMsg, Status, SDO};
+use crate::repository::*;
 use crate::rocksdb::RocksDBRepo;
+
+lazy_static! {
+    pub static ref CHANNEL: MutStatic<(Sender<ChanMsg>, Receiver<ChanMsg>)> = MutStatic::from(broadcast::channel::<ChanMsg>(20));
+}
 
 pub fn extract_last250(text: &str) -> &str {
     let l = text.len();
@@ -41,7 +47,7 @@ pub fn build_message(tmplt: String, target_id: i64) -> SendMessage {
     send_message_builder.build()
 }
 
-pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Status {
+pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Status {
     let kind: MessageKind = message.kind.clone();
     let chat: Arc<Chat> = Arc::new(message.chat.clone());
     let msg_id: i32 = message.id;
@@ -233,38 +239,91 @@ pub fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) -> Sta
                         let target = location.location;
                         log::info!("LOCATION: {:?}", target);
                         let coords = format!("{}_{}", target.latitude, target.longitude);
+
+                        log::info!("Going to sleep!");
                         thread::sleep(time::Duration::from_millis(1000));
-                        let locals = db.find_local_by_coords(target.latitude, target.longitude);
+                        log::info!("Awake!");
 
-                        let covidiano_btn = InlineKeyboardButton {
-                            text: String::from("Covidiana"),
-                            kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", coords)),
-                        };
-                        let despierto_btn = InlineKeyboardButton {
-                            text: String::from("Despierta"),
-                            kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", coords)),
-                        };
-                        let buttons = vec![covidiano_btn, despierto_btn];
-                        let reply_mrkup = InlineKeyboardMarkup {
-                            inline_keyboard: vec![buttons],
-                        };
-                        let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
+                        let mut is_venue = false;
+                        //loop {
+                            match &CHANNEL.write().unwrap().1.try_recv() {
+                                //match rx.recv().await {
+                                Ok(chn_msg) => {
+                                    let is_same = is_within_meters(
+                                        chn_msg.latitude,
+                                        chn_msg.longitude,
+                                        target.latitude,
+                                        target.longitude,
+                                        1_f64,
+                                    );
+                                    log::info!("chn_msg received: {:?} lat: {}, lon: {}, is the same location? {}", chn_msg, target.latitude, target.longitude, is_same);
+                                    if is_same {
+                                        is_venue = chn_msg.is_venue;
+                                        //break;
+                                    }
+                                },
+                                Err(e) => log::error!("Cannel failed: {}", e)
+                            }
+                        //}
 
-                        if locals.len() > 0 {
-                            let res = locals
+                        log::info!("is_venue: {}", is_venue);
+
+                        if is_venue {
+                            let covidiano_btn = InlineKeyboardButton {
+                                text: String::from("Covidiana"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!(
+                                    "{}:1",
+                                    coords
+                                )),
+                            };
+                            let despierto_btn = InlineKeyboardButton {
+                                text: String::from("Despierta"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!(
+                                    "{}:0",
+                                    coords
+                                )),
+                            };
+                            let buttons = vec![covidiano_btn, despierto_btn];
+                            let reply_mrkup = InlineKeyboardMarkup {
+                                inline_keyboard: vec![buttons],
+                            };
+                            let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
+
+                            let locals = db.find_local_by_coords(target.latitude, target.longitude);
+                            if locals.len() > 0 {
+                                let res = locals
                                 .iter()
                                 .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos. Tu que opinas?",
                                      local.name, local.address, local.yays, local.nays))
                                 .collect::<Vec<_>>();
-                            status.text = res.join("\n");
+                                status.text = res.join("\n");
+                            } else {
+                                status.text = String::from(
+                                    "Local NO ha sido reportado. Es esta ubicacion covidiana?",
+                                );
+                            }
+                            status.reply_markup = Some(reply);
                         } else {
-                            status.text = String::from(
-                                "Local NO ha sido reportado. Es esta ubicacion covidiana?",
+                            let locals = db.find_nearby_by_coords(
+                                target.latitude,
+                                target.longitude,
+                                1000_f64,
                             );
+                            if locals.len() > 0 {
+                                let res = locals
+                                .iter()
+                                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos.",
+                                     local.name, local.address, local.yays, local.nays))
+                                .collect::<Vec<_>>();
+                                status.text = res.join("\n");
+                            } else {
+                                status.text = String::from(
+                                    "No se han encontrado locales reportados en un radio de 1km",
+                                );
+                            }
                         }
 
                         status.respond = true;
-                        status.reply_markup = Some(reply);
                         status
                     }
                     _ => {

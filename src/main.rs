@@ -8,6 +8,7 @@ use teloxide::RequestError;
 
 use tokio::spawn;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::time::{sleep, Duration};
 
 //use std::convert::Infallible;
 use std::env;
@@ -24,13 +25,10 @@ use rtdlib::types::RObject;
 use rtdlib::types::UpdateAuthorizationState;
 use rtdlib::Tdlib;
 
-use tokio::time::{sleep, Duration};
-
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
 use highlander::duplicates::{build_message, chat_id_for_link, detect_duplicates};
-use highlander::models::{HResponse, Local as HLocal};
-use highlander::models::User as DBUser;
+use highlander::models::{HResponse, Local as HLocal, User as DBUser};
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
 
@@ -192,7 +190,7 @@ async fn run() {
                             Err(_) => false
                         };
 
-                        let status = detect_duplicates(DB.clone(), &message, user);
+                        let status = detect_duplicates(DB.clone(), &message, user).await;
                         if is_test_mode || !is_admin {
                             let success = if status.action {
                                 let mr = cx.delete_message().await;

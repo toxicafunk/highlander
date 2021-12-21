@@ -82,6 +82,13 @@ pub struct Config {
     pub days_blocked: i64
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChanMsg {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub is_venue: bool
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Local {
     pub latitude: f64,

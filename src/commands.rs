@@ -54,8 +54,10 @@ pub enum Command {
     SetConfig(bool, bool, i64),
     #[command(description = "Retrieves config for the current group")]
     ShowConfig,
-    #[command(description = "find locals by its coordinates")]
+    #[command(description = "find locals by its name")]
     FindLocalsByName(String),
+    #[command(description = "find locals by its address")]
+    FindLocalsByAddress(String),
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -323,6 +325,15 @@ pub fn handle_command(
         }
         Command::FindLocalsByName(name) => {
             let locals = db.find_local_by_name(name);
+            let res = locals
+                .iter()
+                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
+                                     local.name, local.address, local.yays, local.nays))
+                .collect::<Vec<_>>();
+            HResponse::Text(res.join("\n"))
+        }
+        Command::FindLocalsByAddress(address) => {
+            let locals = db.find_local_by_address(address);
             let res = locals
                 .iter()
                 .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos",

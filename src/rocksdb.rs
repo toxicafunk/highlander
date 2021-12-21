@@ -662,25 +662,6 @@ impl Repository<Media> for RocksDBRepo {
     }
 }
 
-//Earth’s radius, sphere
-const EARTH_RADIUS_METERS: f64 = 6378137_f64;
-
-fn is_within_meters(local_lat: f64, local_lon: f64, cur_lat: f64, cur_lon: f64, offset: f64) -> bool {
-    let local_lat_rad = local_lat.to_radians();
-    let cur_lat_rad = cur_lat.to_radians();
-
-    let delta_lat = (local_lat - cur_lat).to_radians();
-    let delta_lon = (local_lon - cur_lon).to_radians();
-
-    let central_angle_inner = (delta_lat / 2.0).sin().powi(2) + cur_lat_rad.cos()
-        * local_lat_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let central_angle = 2.0 * central_angle_inner.sqrt().asin();
-
-    let distance = EARTH_RADIUS_METERS * central_angle;
-    log::info!("Distance between current point and local: {}", distance);
-    distance <= offset
-}
-
 #[cfg(test)]
 mod tests {
     #[test]

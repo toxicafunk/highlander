@@ -1,6 +1,6 @@
 use rtdlib::types::RObject;
 use rtdlib::types::{
-    BanChatMember, Chat, ChatMembers, ChatType, Location, MessageContent, MessageSender,
+    BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
     MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewMessage
 };
 use rtdlib::Tdlib;
@@ -14,15 +14,15 @@ use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
 
-use super::duplicates::extract_last250;
-use super::models::{Group, Local, User};
+use super::duplicates::{CHANNEL, extract_last250};
+use super::models::{ChanMsg, Group, Local, User};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 const LIMIT: i64 = 200;
 
-fn store_local(db: RocksDBRepo, location: &Location, name: String, address: String) -> bool {
-    let local = Local { latitude: location.latitude() as f64, longitude: location.longitude() as f64, name, address, yays: 0, nays: 0 };
+fn store_local(db: RocksDBRepo, latitude: f64, longitude: f64, name: String, address: String) -> bool {
+    let local = Local { latitude, longitude, name, address, yays: 0, nays: 0 };
     db.insert_local(local)
 }
 
@@ -132,15 +132,33 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 let location = venue.location();
                                 let name = venue.title();
                                 let address = venue.address();
-                                if !store_local(db.clone(), location, name.to_string(), address.to_string()) {
+                                let latitude = location.latitude() as f64;
+                                let longitude = location.longitude() as f64;
+                                let chn_msg = ChanMsg {latitude, longitude, is_venue: true};
+
+                                let tx = CHANNEL.read().unwrap().0.clone();
+                                match tx.send(chn_msg) {
+                                    Err(e) => log::error!("Channel send failed: {}", e),
+                                    Ok(num) => log::info!("Venue sent: {}, count: {}", num, tx.receiver_count())
+                                }
+                                //drop(tx);
+                                if !store_local(db.clone(), latitude, longitude, name.to_string(), address.to_string()) {
                                     log::error!("Failed to store location for {:?}", venue)
                                 }
                             }
                             MessageContent::MessageLocation(message_location) => {
                                 log::info!("Location: {:?}", message_location);
-                                /*let location = message_location.location();
-                                let locals = db.find_local_by_coords(location.latitude() as f64, location.longitude() as f64);
-                                log::info!("{:?}", locals)*/
+                                let location = message_location.location();
+                                let latitude = location.latitude() as f64;
+                                let longitude = location.longitude() as f64;
+                                let chn_msg = ChanMsg {latitude, longitude, is_venue: false};
+
+                                let tx = CHANNEL.read().unwrap().0.clone();
+                                match tx.send(chn_msg) {
+                                    Err(e) => log::error!("Channel send failed: {}", e),
+                                    Ok(num) => log::info!("Location sent: {}, count: {}", num, tx.receiver_count())
+                                }
+                                //drop(tx);
                             }
                             _ => log::info!("Unknown type: {:?}", message),
                         }
