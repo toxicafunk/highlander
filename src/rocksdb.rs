@@ -613,7 +613,7 @@ impl Repository<Media> for RocksDBRepo {
                 false
             }
             Ok(media_ser) => {
-                let k = format!("{}_{}", local.latitude, local.longitude);
+                let k = local.id;
                 match self.db.put_cf(locals_handle, key(k.as_bytes()), media_ser) {
                     Err(e) => {
                         log::error!("insert_local: {}", e);
@@ -629,6 +629,30 @@ impl Repository<Media> for RocksDBRepo {
 
     }
 
+    fn get_local(&self, id: String) -> Option<Local> {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        match self.db.get_cf(&locals_handle, id.clone()) {
+            Ok(Some(l_ser)) => {
+                match bincode::deserialize::<Local>(&l_ser) {
+                    Ok(local) => Some(local),
+                    Err(e) => {
+                        log::error!("Error deserializing local {}\n{}", id, e);
+                        None
+                    }
+                }
+            },
+            Ok(_) => {
+                log::error!("Retrieved empty local {}", id);
+                None
+            }
+            Err(e) => {
+                log::error!("Error retrieving local {}\n{}", id, e);
+                None
+            }
+
+        }
+    }
+
     fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<Local> {
         self.find_nearby_by_coords(latitude, longitude, 1_f64)
     }
@@ -636,12 +660,8 @@ impl Repository<Media> for RocksDBRepo {
     fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<Local> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
         self.db.iterator_cf(locals_handle, IteratorMode::Start)
-            .filter(|(k_ser, _)| {
-                let key = String::from_utf8(k_ser.to_vec()).unwrap();
-                let local: Vec<&str> = key.split("_").collect();
-                is_within_meters(local[0].parse::<f64>().unwrap(), local[1].parse::<f64>().unwrap(), latitude, longitude, offset)
-            })
             .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
+            .filter(|local| is_within_meters(local.latitude, local.longitude, latitude, longitude, offset))
             .collect::<Vec<_>>()
     }
 

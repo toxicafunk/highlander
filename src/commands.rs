@@ -11,12 +11,16 @@ use chrono::offset::{TimeZone, Utc};
 
 use std::sync::Arc;
 
-use super::models::{Config, User, HResponse};
+use super::models::{Config, HResponse, User};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 #[derive(BotCommand)]
-#[command(rename = "lowercase", description = "These commands are supported:", parse_with = "split")]
+#[command(
+    rename = "lowercase",
+    description = "These commands are supported:",
+    parse_with = "split"
+)]
 pub enum Command {
     #[command(description = "display this text.")]
     Help,
@@ -50,7 +54,9 @@ pub enum Command {
     GetChatIds,
     #[command(description = "Bans the corresponding user to this user id")]
     BanUser(i64),
-    #[command(description = "Sets whether the current group allows any forwards, blocks non-latin characters in names and the number of days to store 'duplicated' messages")]
+    #[command(
+        description = "Sets whether the current group allows any forwards, blocks non-latin characters in names and the number of days to store 'duplicated' messages"
+    )]
     SetConfig(bool, bool, i64),
     #[command(description = "Retrieves config for the current group")]
     ShowConfig,
@@ -129,220 +135,252 @@ pub fn handle_command(
     tdlib: Arc<Tdlib>,
     command: Command,
     chat_id: i64,
+    is_admin: bool,
 ) -> Result<HResponse, RequestError> {
     let get_participants_reply =
         String::from("Comando ejecutado, ahora puede ejecutar /findinterusers");
     let response_too_long =
         String::from("Respuesta demasiado larga para mostart en Telegram, ver logs.");
-    let r = match command {
-        Command::Help => HResponse::URL(vec![Command::descriptions()]),
-        Command::LastMediaStored(num) => {
-            let media_vec = db.last_media_stored(chat_id, num.into(), false);
-            let vec = media_vec
-                .iter()
-                .map(|media| {
-                    let file_id = str_to_option(&media.file_id);
-                    let unique_id = str_to_option(&media.unique_id);
-                    prepare_input_media(media.file_type.as_str(), file_id, unique_id)
-                })
-                .collect();
-            HResponse::Media(vec)
-        }
-        Command::LastUrlStored(num) => {
-            let media_vec = db.last_media_stored(chat_id, num.into(), true);
-            let vec = media_vec
-                .iter()
-                .map(|media| media.unique_id.to_owned())
-                .collect();
-            HResponse::URL(vec)
-        }
-        Command::LastDuplicateMedia(num) => {
-            let media_vec = db.last_media_duplicated(chat_id, num.into(), false);
-            let vec = media_vec
-                .iter()
-                .map(|media| {
-                    let file_id = str_to_option(&media.file_id);
-                    let unique_id = str_to_option(&media.unique_id);
-                    prepare_input_media(media.file_type.as_str(), file_id, unique_id)
-                })
-                .collect();
-            HResponse::Media(vec)
-        }
-        Command::LastDuplicateUrls(num) => {
-            let media_vec = db.last_media_duplicated(chat_id, num.into(), true);
-            let vec = media_vec
-                .iter()
-                .map(|media| media.unique_id.to_owned())
-                .collect();
-            HResponse::URL(vec)
-        }
-        Command::FindInterUsers(num_groups) => {
-            let exclude_list: Vec<&str> = vec![
-                "1733079574",
-                "162726413",
-                "1575436070",
-                "1042885111",
-                "785731637",
-                "208056682",
-                "634570122",
-                "417753222",
-                "713650430",
-                "181514",
-                "1241123223"
-            ];
-
-            let vec = db
-                .get_users_chat_count(chat_id, num_groups)
-                .iter()
-                .filter(|tup| {
-                    let user_id = tup.0.user_id.to_string();
-                    !exclude_list.contains(&user_id.as_str())
-                })
-                .map(|tup| {
-                    let user = tup.0.clone();
-                    let count = tup.1;
-                    format!(
-                        "UserId: {}, GroupId: {}, UserName: {} found in {} groups",
-                        user.user_id, user.chat_id, user.user_name, count
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            HResponse::URL(vec)
-        }
-        Command::BanInterUsers(num_groups) => {
-            let exclude_list: Vec<&str> = vec![
-                "1733079574",
-                "162726413",
-                "1575436070",
-                "1042885111",
-                "785731637",
-                "208056682",
-                "634570122",
-                "417753222",
-                "181514",
-                "1241123223"
-            ];
-
-            let vec = db
-                .get_users_chat_count(chat_id, num_groups)
-                .iter()
-                .filter(|tup| {
-                    let user_id = tup.0.user_id.to_string();
-                    !exclude_list.contains(&user_id.as_str())
-                })
-                .map(|tup| tup.0.clone())
-                .collect::<Vec<_>>();
-            HResponse::Ban(vec)
-        }
-
-        Command::ListUserGroups(id) => {
-            let users_vec = db.list_user_groups(chat_id, id);
-            let vec = users_vec
-                .iter()
-                .map(|user| format!("GroupId: {}, GroupName: {}", user.chat_id, user.chat_name))
-                .collect();
-            HResponse::URL(vec)
-        }
-        Command::GetChatParticipants => {
-            log::info!("Connecting to Telegram...");
-            let chat_ids = db.get_chat_ids();
-            log::info!("chats: {:?}", chat_ids);
-            get_participants(tdlib, chat_ids);
-            HResponse::Text(get_participants_reply)
-        }
-        Command::FindInactiveUsers(ndays) => {
-            let vec = db
-                .inactive_users_before(ndays)
-                .iter()
-                .map(|user| {
-                    format!(
-                        "UserId: {}, UserName: {}, Last Update: {}",
-                        user.user_id, user.user_name, Utc.timestamp(user.timestamp, 0)
-                    )
-                })
-                .collect::<Vec<_>>();
-            HResponse::URL(vec)
-        }
-        Command::BanInactiveUsers(ndays) => {
-            let vec = db.inactive_users_before(ndays);
-            HResponse::Ban(vec)
-        }
-        Command::ListMedia(num) => {
-            let media_vec = db.list_media(num.into());
-            let vec = media_vec
-                .iter()
-                .map(|media| format!("{:?}", media))
-                .collect::<Vec<_>>();
-            log::info!("ListMedia: {}", vec.join("\n"));
-            HResponse::Text(response_too_long)
-        }
-
-        Command::ListUsers(num) => {
-            let users_vec = db.list_users(num.into());
-            let vec = users_vec
-                .iter()
-                .map(|user| format!("{:?}", user))
-                .collect::<Vec<_>>();
-            log::info!("ListUsers: {}", vec.join("\n"));
-            HResponse::Text(response_too_long)
-        }
-
-        Command::ListDuplicates(num) => {
-            let media_vec = db.list_duplicates(num.into());
-            let vec = media_vec
-                .iter()
-                .map(|media| format!("{:?}", media))
-                .collect::<Vec<_>>();
-            log::info!("ListDuplicates: {}", vec.join("\n"));
-            HResponse::Text(response_too_long)
-        }
-        Command::GetChatIds => {
-            let vec = db
-                .get_chat_ids()
-                .iter()
-                .map(|i| i.to_string())
-                .collect::<Vec<_>>();
-            HResponse::Text(vec.join("\n"))
-        }
-        Command::BanUser(user_id) => {
-            if db.chat_dbuser_exists(user_id, chat_id) {
-                let vec = vec![User { user_id, chat_id, user_name: String::default(), chat_name: String::default(), timestamp: 0 }];
-                HResponse::Ban(vec)
-            } else {
-                let msg = format!("User {} not found on chat {}", user_id, chat_id);
-                HResponse::Text(msg)
+    let r = if is_admin {
+        match command {
+            Command::Help => HResponse::URL(vec![Command::descriptions()]),
+            Command::LastMediaStored(num) => {
+                let media_vec = db.last_media_stored(chat_id, num.into(), false);
+                let vec = media_vec
+                    .iter()
+                    .map(|media| {
+                        let file_id = str_to_option(&media.file_id);
+                        let unique_id = str_to_option(&media.unique_id);
+                        prepare_input_media(media.file_type.as_str(), file_id, unique_id)
+                    })
+                    .collect();
+                HResponse::Media(vec)
             }
-        },
-        Command::SetConfig(allow_forwards, block_non_latin, days_blocked) => {
-            let config = Config { allow_forwards, block_non_latin, days_blocked };
-            let success = db.update_config(config, chat_id);
-            HResponse::Text(format!("Config updated: {}", success))
-        },
-        Command::ShowConfig => {
-            let config = db.get_config(chat_id);
-            HResponse::Text(format!("{:?}", config))
+            Command::LastUrlStored(num) => {
+                let media_vec = db.last_media_stored(chat_id, num.into(), true);
+                let vec = media_vec
+                    .iter()
+                    .map(|media| media.unique_id.to_owned())
+                    .collect();
+                HResponse::URL(vec)
+            }
+            Command::LastDuplicateMedia(num) => {
+                let media_vec = db.last_media_duplicated(chat_id, num.into(), false);
+                let vec = media_vec
+                    .iter()
+                    .map(|media| {
+                        let file_id = str_to_option(&media.file_id);
+                        let unique_id = str_to_option(&media.unique_id);
+                        prepare_input_media(media.file_type.as_str(), file_id, unique_id)
+                    })
+                    .collect();
+                HResponse::Media(vec)
+            }
+            Command::LastDuplicateUrls(num) => {
+                let media_vec = db.last_media_duplicated(chat_id, num.into(), true);
+                let vec = media_vec
+                    .iter()
+                    .map(|media| media.unique_id.to_owned())
+                    .collect();
+                HResponse::URL(vec)
+            }
+            Command::FindInterUsers(num_groups) => {
+                let exclude_list: Vec<&str> = vec![
+                    "1733079574",
+                    "162726413",
+                    "1575436070",
+                    "1042885111",
+                    "785731637",
+                    "208056682",
+                    "634570122",
+                    "417753222",
+                    "713650430",
+                    "181514",
+                    "1241123223",
+                ];
+
+                let vec = db
+                    .get_users_chat_count(chat_id, num_groups)
+                    .iter()
+                    .filter(|tup| {
+                        let user_id = tup.0.user_id.to_string();
+                        !exclude_list.contains(&user_id.as_str())
+                    })
+                    .map(|tup| {
+                        let user = tup.0.clone();
+                        let count = tup.1;
+                        format!(
+                            "UserId: {}, GroupId: {}, UserName: {} found in {} groups",
+                            user.user_id, user.chat_id, user.user_name, count
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                HResponse::URL(vec)
+            }
+            Command::BanInterUsers(num_groups) => {
+                let exclude_list: Vec<&str> = vec![
+                    "1733079574",
+                    "162726413",
+                    "1575436070",
+                    "1042885111",
+                    "785731637",
+                    "208056682",
+                    "634570122",
+                    "417753222",
+                    "181514",
+                    "1241123223",
+                ];
+
+                let vec = db
+                    .get_users_chat_count(chat_id, num_groups)
+                    .iter()
+                    .filter(|tup| {
+                        let user_id = tup.0.user_id.to_string();
+                        !exclude_list.contains(&user_id.as_str())
+                    })
+                    .map(|tup| tup.0.clone())
+                    .collect::<Vec<_>>();
+                HResponse::Ban(vec)
+            }
+
+            Command::ListUserGroups(id) => {
+                let users_vec = db.list_user_groups(chat_id, id);
+                let vec = users_vec
+                    .iter()
+                    .map(|user| format!("GroupId: {}, GroupName: {}", user.chat_id, user.chat_name))
+                    .collect();
+                HResponse::URL(vec)
+            }
+            Command::GetChatParticipants => {
+                log::info!("Connecting to Telegram...");
+                let chat_ids = db.get_chat_ids();
+                log::info!("chats: {:?}", chat_ids);
+                get_participants(tdlib, chat_ids);
+                HResponse::Text(get_participants_reply)
+            }
+            Command::FindInactiveUsers(ndays) => {
+                let vec = db
+                    .inactive_users_before(ndays)
+                    .iter()
+                    .map(|user| {
+                        format!(
+                            "UserId: {}, UserName: {}, Last Update: {}",
+                            user.user_id,
+                            user.user_name,
+                            Utc.timestamp(user.timestamp, 0)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                HResponse::URL(vec)
+            }
+            Command::BanInactiveUsers(ndays) => {
+                let vec = db.inactive_users_before(ndays);
+                HResponse::Ban(vec)
+            }
+            Command::ListMedia(num) => {
+                let media_vec = db.list_media(num.into());
+                let vec = media_vec
+                    .iter()
+                    .map(|media| format!("{:?}", media))
+                    .collect::<Vec<_>>();
+                log::info!("ListMedia: {}", vec.join("\n"));
+                HResponse::Text(response_too_long)
+            }
+
+            Command::ListUsers(num) => {
+                let users_vec = db.list_users(num.into());
+                let vec = users_vec
+                    .iter()
+                    .map(|user| format!("{:?}", user))
+                    .collect::<Vec<_>>();
+                log::info!("ListUsers: {}", vec.join("\n"));
+                HResponse::Text(response_too_long)
+            }
+
+            Command::ListDuplicates(num) => {
+                let media_vec = db.list_duplicates(num.into());
+                let vec = media_vec
+                    .iter()
+                    .map(|media| format!("{:?}", media))
+                    .collect::<Vec<_>>();
+                log::info!("ListDuplicates: {}", vec.join("\n"));
+                HResponse::Text(response_too_long)
+            }
+            Command::GetChatIds => {
+                let vec = db
+                    .get_chat_ids()
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>();
+                HResponse::Text(vec.join("\n"))
+            }
+            Command::BanUser(user_id) => {
+                if db.chat_dbuser_exists(user_id, chat_id) {
+                    let vec = vec![User {
+                        user_id,
+                        chat_id,
+                        user_name: String::default(),
+                        chat_name: String::default(),
+                        timestamp: 0,
+                    }];
+                    HResponse::Ban(vec)
+                } else {
+                    let msg = format!("User {} not found on chat {}", user_id, chat_id);
+                    HResponse::Text(msg)
+                }
+            }
+            Command::SetConfig(allow_forwards, block_non_latin, days_blocked) => {
+                let config = Config {
+                    allow_forwards,
+                    block_non_latin,
+                    days_blocked,
+                };
+                let success = db.update_config(config, chat_id);
+                HResponse::Text(format!("Config updated: {}", success))
+            }
+            Command::ShowConfig => {
+                let config = db.get_config(chat_id);
+                HResponse::Text(format!("{:?}", config))
+            }
+            _ => process_non_admin_command(db, command)
         }
-        Command::FindLocalsByName(name) => {
-            let locals = db.find_local_by_name(name);
-            let res = locals
-                .iter()
-                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
-                                     local.name, local.address, local.yays, local.nays))
-                .collect::<Vec<_>>();
-            HResponse::Text(res.join("\n"))
-        }
-        Command::FindLocalsByAddress(address) => {
-            let locals = db.find_local_by_address(address);
-            let res = locals
-                .iter()
-                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
-                                     local.name, local.address, local.yays, local.nays))
-                .collect::<Vec<_>>();
-            HResponse::Text(res.join("\n"))
-        }
+    } else {
+        process_non_admin_command(db, command)
     };
     Ok(r)
+}
+
+fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
+    match command {
+            Command::FindLocalsByName(name) => {
+                let locals = db.find_local_by_name(name);
+                let res = locals
+                    .iter()
+                    .map(|local| {
+                        format!(
+                            "{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
+                            local.name, local.address, local.yays, local.nays
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                HResponse::Text(res.join("\n"))
+            }
+            Command::FindLocalsByAddress(address) => {
+                let locals = db.find_local_by_address(address);
+                let res = locals
+                    .iter()
+                    .map(|local| {
+                        format!(
+                            "{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
+                            local.name, local.address, local.yays, local.nays
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                HResponse::Text(res.join("\n"))
+            }
+            _ => HResponse::Forbidden("Lamentablemente, este comando es solo para usuarios Admin".to_string()),
+        }
 }
 
 fn get_participants(tdlib: Arc<Tdlib>, chat_ids: Vec<i64>) {

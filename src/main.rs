@@ -7,8 +7,8 @@ use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
 
 use tokio::spawn;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio::time::{sleep, Duration};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 //use std::convert::Infallible;
 use std::env;
@@ -233,8 +233,7 @@ async fn run() {
                                 }
                                 match Command::parse(txt, bot_name) {
                                 Ok(command) => {
-                                    if is_admin {
-                                        let cr = handle_command(DB.clone(), TDLIB.clone(), command, message.chat_id());
+                                        let cr = handle_command(DB.clone(), TDLIB.clone(), command, message.chat_id(), is_admin);
                                         match cr {
                                             Ok(hr) => match hr {
                                                 HResponse::URL(urls) => {
@@ -269,12 +268,13 @@ async fn run() {
                                                                  .collect::<Vec<_>>();
                                                     log::info!("Banned {} users", b.len())
                                                 }
+                                                HResponse::Forbidden(txt) => {
+                                                    ok!(cx.answer(txt.clone()).await);
+                                                    log::info!("Forbidden: {}", txt)
+                                                }
                                             },
                                             Err(e) => log::error!("Error: {:?}", e)
                                         }
-                                    } else {
-                                        ok!(cx.answer("Lamentablemente, este comando es solo para usuarios Admin").await);
-                                    }
                                 }
                                 Err(_) => ()
                             }
@@ -309,13 +309,27 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
     };
 
     let parts: Vec<&str> = data.split(":").collect();
-    let coords: Vec<&str> = parts[0].split("_").collect();
+    let id = parts[0].to_string();
     let vote: u16 = parts[1].parse().unwrap();
-    let locals: Vec<HLocal> = DB.find_local_by_coords(coords[0].parse::<f64>().unwrap(), coords[1].parse::<f64>().unwrap());
-    let yay = if vote == 1 { 1 } else { 0 };
-    let nay = if vote == 0 { 1 } else { 0 };
-    let local = HLocal::new(&locals[0], yay, nay);
-    let success = DB.insert_local(local);
+    let success = match DB.get_local(id.clone()) {
+        Some(local) => {
+            let current_yays = local.yays;
+            let current_nays = local.nays;
+            let yays = if vote == 1 {
+                current_yays + 1
+            } else {
+                current_yays
+            };
+            let nays = if vote == 0 {
+                current_nays + 1
+            } else {
+                current_nays
+            };
+            let updated_local = HLocal::new(id, &local, yays, nays);
+            DB.insert_local(updated_local)
+        }
+        None => false,
+    };
 
     match cx
         .requester
@@ -328,13 +342,15 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
         _ => log::info!("{}", data),
     }
 
-    match cx.requester
+    match cx
+        .requester
         .edit_message_text(user_id, message_id, format!("Voto contabilizado!"))
         .send()
-        .await {
-            Err(e) => log::error!("Error edit_message {}", e),
-            _ => log::info!("Great!")
-        }
+        .await
+    {
+        Err(e) => log::error!("Error edit_message {}", e),
+        _ => log::info!("Great!"),
+    }
 }
 
 type Cx = UpdateWithCx<AutoSend<Bot>, Message>;

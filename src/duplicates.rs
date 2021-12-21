@@ -11,7 +11,9 @@ use teloxide::types::{
     InlineKeyboardMarkup, MediaKind, MessageKind, ReplyMarkup, User,
 };
 
-use rtdlib::types::{ FormattedText, InputMessageContent, InputMessageText, SendMessage,
+use rtdlib::types::{
+    FormattedText, InputMessageContent, InputMessageText,
+    SendMessage,
     /*ReplyMarkupInlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonType, InlineKeyboardButtonTypeCallback*/
 };
 //use rtdlib::Tdlib;
@@ -27,7 +29,8 @@ use crate::repository::*;
 use crate::rocksdb::RocksDBRepo;
 
 lazy_static! {
-    pub static ref CHANNEL: MutStatic<(Sender<ChanMsg>, Receiver<ChanMsg>)> = MutStatic::from(broadcast::channel::<ChanMsg>(20));
+    pub static ref CHANNEL: MutStatic<(Sender<ChanMsg>, Receiver<ChanMsg>)> =
+        MutStatic::from(broadcast::channel::<ChanMsg>(20));
 }
 
 pub fn extract_last250(text: &str) -> &str {
@@ -238,50 +241,30 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                     MediaKind::Location(location) => {
                         let target = location.location;
                         log::info!("LOCATION: {:?}", target);
-                        let coords = format!("{}_{}", target.latitude, target.longitude);
+                        //let coords = format!("{}_{}", target.latitude, target.longitude);
 
                         log::info!("Going to sleep!");
                         thread::sleep(time::Duration::from_millis(1000));
                         log::info!("Awake!");
 
-                        let mut is_venue = false;
-                        //loop {
-                            match &CHANNEL.write().unwrap().1.try_recv() {
-                                //match rx.recv().await {
-                                Ok(chn_msg) => {
-                                    let is_same = is_within_meters(
-                                        chn_msg.latitude,
-                                        chn_msg.longitude,
-                                        target.latitude,
-                                        target.longitude,
-                                        1_f64,
-                                    );
-                                    log::info!("chn_msg received: {:?} lat: {}, lon: {}, is the same location? {}", chn_msg, target.latitude, target.longitude, is_same);
-                                    if is_same {
-                                        is_venue = chn_msg.is_venue;
-                                        //break;
-                                    }
-                                },
-                                Err(e) => log::error!("Cannel failed: {}", e)
+                        let (id, is_venue) = match &CHANNEL.write().unwrap().1.try_recv() {
+                            Ok(chn_msg) => (chn_msg.id.clone(), chn_msg.is_venue),
+                            Err(e) => {
+                                log::error!("Cannel failed: {}", e);
+                                (String::new(), false)
                             }
-                        //}
+                        };
 
                         log::info!("is_venue: {}", is_venue);
 
                         if is_venue {
                             let covidiano_btn = InlineKeyboardButton {
                                 text: String::from("Covidiana"),
-                                kind: InlineKeyboardButtonKind::CallbackData(format!(
-                                    "{}:1",
-                                    coords
-                                )),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", id)),
                             };
                             let despierto_btn = InlineKeyboardButton {
                                 text: String::from("Despierta"),
-                                kind: InlineKeyboardButtonKind::CallbackData(format!(
-                                    "{}:0",
-                                    coords
-                                )),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", id)),
                             };
                             let buttons = vec![covidiano_btn, despierto_btn];
                             let reply_mrkup = InlineKeyboardMarkup {
@@ -289,21 +272,21 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                             };
                             let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
 
-                            let locals = db.find_local_by_coords(target.latitude, target.longitude);
-                            if locals.len() > 0 {
-                                let res = locals
-                                .iter()
-                                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos. Tu que opinas?",
-                                     local.name, local.address, local.yays, local.nays))
-                                .collect::<Vec<_>>();
-                                status.text = res.join("\n");
-                            } else {
-                                status.text = String::from(
-                                    "Local NO ha sido reportado. Es esta ubicacion covidiana?",
-                                );
+                            match db.get_local(id) {
+                                Some(local) => {
+                                    let txt = format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos. Tu que opinas?",
+                                     local.name, local.address, local.yays, local.nays);
+                                    status.text = txt;
+                                }
+                                None => {
+                                    status.text = String::from(
+                                        "Local NO ha sido reportado. Es esta ubicacion covidiana?",
+                                    )
+                                }
                             }
                             status.reply_markup = Some(reply);
                         } else {
+                            log::info!("Looking locals at 1km near {}, {}", target.latitude, target.longitude);
                             let locals = db.find_nearby_by_coords(
                                 target.latitude,
                                 target.longitude,

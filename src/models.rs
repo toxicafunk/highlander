@@ -84,6 +84,7 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChanMsg {
+    pub id: String,
     pub latitude: f64,
     pub longitude: f64,
     pub is_venue: bool
@@ -91,6 +92,7 @@ pub struct ChanMsg {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Local {
+    pub id: String,
     pub latitude: f64,
     pub longitude: f64,
     pub name: String,
@@ -100,8 +102,9 @@ pub struct Local {
 }
 
 impl Local {
-    pub fn new(local: &Local, yay: u16, nay: u16) -> Self {
+    pub fn new(id: String, local: &Local, yay: u16, nay: u16) -> Self {
         Self {
+            id,
             latitude: local.latitude,
             longitude: local.longitude,
             name: local.name.clone(),
@@ -117,4 +120,5 @@ pub enum HResponse {
     Media(Vec<InputMedia>),
     URL(Vec<String>),
     Text(String),
+    Forbidden(String),
 }

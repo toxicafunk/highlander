@@ -1,7 +1,7 @@
 use rtdlib::types::RObject;
 use rtdlib::types::{
-    BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender,
-    MessageSenderUser, TextEntityType, UpdateDeleteMessages, UpdateNewMessage
+    BanChatMember, Chat, ChatMembers, ChatType, MessageContent, MessageSender, MessageSenderUser,
+    TextEntityType, UpdateDeleteMessages, UpdateNewMessage,
 };
 use rtdlib::Tdlib;
 
@@ -14,15 +14,30 @@ use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
 
-use super::duplicates::{CHANNEL, extract_last250};
+use super::duplicates::{extract_last250, CHANNEL};
 use super::models::{ChanMsg, Group, Local, User};
 use super::repository::Repository;
 use super::rocksdb::RocksDBRepo;
 
 const LIMIT: i64 = 200;
 
-fn store_local(db: RocksDBRepo, latitude: f64, longitude: f64, name: String, address: String) -> bool {
-    let local = Local { latitude, longitude, name, address, yays: 0, nays: 0 };
+fn store_local(
+    db: RocksDBRepo,
+    id: String,
+    latitude: f64,
+    longitude: f64,
+    name: String,
+    address: String,
+) -> bool {
+    let local = Local {
+        id,
+        latitude,
+        longitude,
+        name,
+        address,
+        yays: 0,
+        nays: 0,
+    };
     db.insert_local(local)
 }
 
@@ -130,33 +145,73 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                 log::info!("Venue: {:?}", message_venue);
                                 let venue = message_venue.venue();
                                 let location = venue.location();
+                                let id = venue.id().as_str().to_string();
                                 let name = venue.title();
                                 let address = venue.address();
                                 let latitude = location.latitude() as f64;
                                 let longitude = location.longitude() as f64;
-                                let chn_msg = ChanMsg {latitude, longitude, is_venue: true};
+                                let chn_msg = ChanMsg {
+                                    id: id.clone(),
+                                    latitude,
+                                    longitude,
+                                    is_venue: true,
+                                };
+
+                                match db.get_local(id.clone()) {
+                                    Some(_) => log::info!("Known venue {}", id),
+                                    None => {
+                                        if !store_local(
+                                            db.clone(),
+                                            id,
+                                            latitude,
+                                            longitude,
+                                            name.to_string(),
+                                            address.to_string(),
+                                        ) {
+                                            log::error!("Failed to store location for {:?}", venue)
+                                        }
+                                    }
+                                }
 
                                 let tx = CHANNEL.read().unwrap().0.clone();
                                 match tx.send(chn_msg) {
-                                    Err(e) => log::error!("Channel send failed: {}", e),
-                                    Ok(num) => log::info!("Venue sent: {}, count: {}", num, tx.receiver_count())
+                                    Err(e) => log::error!(
+                                        "Channel send failed: {} - {}",
+                                        e,
+                                        tx.receiver_count()
+                                    ),
+                                    Ok(num) => log::info!(
+                                        "Venue sent: {}, count: {}",
+                                        num,
+                                        tx.receiver_count()
+                                    ),
                                 }
                                 //drop(tx);
-                                if !store_local(db.clone(), latitude, longitude, name.to_string(), address.to_string()) {
-                                    log::error!("Failed to store location for {:?}", venue)
-                                }
                             }
                             MessageContent::MessageLocation(message_location) => {
                                 log::info!("Location: {:?}", message_location);
                                 let location = message_location.location();
                                 let latitude = location.latitude() as f64;
                                 let longitude = location.longitude() as f64;
-                                let chn_msg = ChanMsg {latitude, longitude, is_venue: false};
+                                let chn_msg = ChanMsg {
+                                    id: String::new(),
+                                    latitude,
+                                    longitude,
+                                    is_venue: false,
+                                };
 
                                 let tx = CHANNEL.read().unwrap().0.clone();
                                 match tx.send(chn_msg) {
-                                    Err(e) => log::error!("Channel send failed: {}", e),
-                                    Ok(num) => log::info!("Location sent: {}, count: {}", num, tx.receiver_count())
+                                    Err(e) => log::error!(
+                                        "Channel send failed: {} - {}",
+                                        e,
+                                        tx.receiver_count()
+                                    ),
+                                    Ok(num) => log::info!(
+                                        "Location sent: {}, count: {}",
+                                        num,
+                                        tx.receiver_count()
+                                    ),
                                 }
                                 //drop(tx);
                             }
