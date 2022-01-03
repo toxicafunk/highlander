@@ -80,9 +80,11 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
 
             let chat_config = db.get_config(chat.id);
             log::info!(
-                "is forwarded: {} group allows forwards: {}",
+                "is forwarded: {} \ngroup allows forwards: {}\nallow media dups: {}\n allow links dup: {}",
                 is_forwarded,
-                chat_config.allow_forwards
+                chat_config.allow_forwards,
+                chat_config.allow_duplicate_media,
+                chat_config.allow_duplicate_links
             );
 
             if is_forwarded && !chat_config.allow_forwards {
@@ -98,48 +100,52 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                         lazy_static! {
                             static ref RE: Regex = ok!(Regex::new("(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?"));
                         }
-                        let t: &str = &*text.text;
-                        let mut statuses: Vec<(Status, &str)> = Vec::new();
-                        RE.captures_iter(t).for_each(|cap| {
-                            let url = cap.get(0).unwrap().as_str();
-                            log::info!("Detected url: {}", url);
-                            let chat = chat.clone();
-                            let unique_id = extract_last250(url).into();
-                            let sdo = SDO {
-                                chat,
-                                msg_id,
-                                file_type: String::from("url"),
-                                unique_id,
-                                file_id: None,
-                            };
-                            let new_status = handle_message(db.clone(), &status, sdo, "urls");
-                            statuses.push((new_status, url));
-                        });
+                        if !chat_config.allow_duplicate_links {
+                            let t: &str = &*text.text;
+                            let mut statuses: Vec<(Status, &str)> = Vec::new();
+                            RE.captures_iter(t).for_each(|cap| {
+                                let url = cap.get(0).unwrap().as_str();
+                                log::info!("Detected url: {}", url);
+                                let chat = chat.clone();
+                                let unique_id = extract_last250(url).into();
+                                let sdo = SDO {
+                                    chat,
+                                    msg_id,
+                                    file_type: String::from("url"),
+                                    unique_id,
+                                    file_id: None,
+                                };
+                                let new_status = handle_message(db.clone(), &status, sdo, "urls");
+                                statuses.push((new_status, url));
+                            });
 
-                        if statuses.len() == 1 {
-                            statuses[0].0.clone()
-                        } else if statuses.len() > 1 {
-                            let has_valid_url = statuses.iter().any(|el| !el.0.action);
-                            log::info!("Has Valid Url: {}", has_valid_url);
-                            if has_valid_url {
-                                // At least 1 url is NOT duplicate
-                                let mut result = statuses.into_iter().fold(
-                                    (status, t.to_string()),
-                                    |acc, el| {
-                                        log::info!("status: {:?}", acc.0);
-                                        if el.0.action {
-                                            let stat = acc.0.clone();
-                                            let new_text = acc.1.replace(el.1, "DUPLICATED");
-                                            (stat, new_text)
-                                        } else {
-                                            (el.0, acc.1)
-                                        }
-                                    },
-                                );
-                                result.0.text = result.1.to_string();
-                                result.0
-                            } else {
+                            if statuses.len() == 1 {
                                 statuses[0].0.clone()
+                            } else if statuses.len() > 1 {
+                                let has_valid_url = statuses.iter().any(|el| !el.0.action);
+                                log::info!("Has Valid Url: {}", has_valid_url);
+                                if has_valid_url {
+                                    // At least 1 url is NOT duplicate
+                                    let mut result = statuses.into_iter().fold(
+                                        (status, t.to_string()),
+                                        |acc, el| {
+                                            log::info!("status: {:?}", acc.0);
+                                            if el.0.action {
+                                                let stat = acc.0.clone();
+                                                let new_text = acc.1.replace(el.1, "DUPLICATED");
+                                                (stat, new_text)
+                                            } else {
+                                                (el.0, acc.1)
+                                            }
+                                        },
+                                    );
+                                    result.0.text = result.1.to_string();
+                                    result.0
+                                } else {
+                                    statuses[0].0.clone()
+                                }
+                            } else {
+                                status
                             }
                         } else {
                             status
@@ -156,82 +162,103 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                         handle_message(db, status, sdo, "media")
                     },*/
                     MediaKind::Audio(audio) => {
-                        let file_unique_id = audio.audio.file_unique_id;
-                        let file_id = audio.audio.file_id;
-                        log::info!("Audio: {:?}", message);
-                        let caption = &*audio.caption.unwrap_or_else(|| message.id.to_string());
-                        status.text = caption.into();
-                        let sdo = SDO {
-                            chat,
-                            msg_id,
-                            file_type: String::from("audio"),
-                            unique_id: file_unique_id,
-                            file_id: Some(file_id),
-                        };
-                        handle_message(db, &status, sdo, "media")
-                    }
-                    MediaKind::Document(document) => {
-                        let file_unique_id = document.document.file_unique_id;
-                        let file_id = document.document.file_id;
-                        log::info!("Document: {:?}", message);
-                        let caption = &*document.caption.unwrap_or_else(|| message.id.to_string());
-                        status.text = caption.into();
-                        let sdo = SDO {
-                            chat,
-                            msg_id,
-                            file_type: String::from("document"),
-                            unique_id: file_unique_id,
-                            file_id: Some(file_id),
-                        };
-                        handle_message(db, &status, sdo, "media")
-                    }
-                    MediaKind::Photo(photo) => {
-                        log::info!("Photo: {:?}", message);
-                        let caption = &*photo.caption.unwrap_or_else(|| message.id.to_string());
-                        status.text = caption.into();
-                        photo.photo.iter().fold(status, |acc, p| {
-                            let file_unique_id = &*p.file_unique_id;
-                            let file_id = &*p.file_id;
-                            let chat = chat.clone();
+                        if !chat_config.allow_duplicate_media {
+                            let file_unique_id = audio.audio.file_unique_id;
+                            let file_id = audio.audio.file_id;
+                            log::info!("Audio: {:?}", message);
+                            let caption = &*audio.caption.unwrap_or_else(|| message.id.to_string());
+                            status.text = caption.into();
                             let sdo = SDO {
                                 chat,
                                 msg_id,
-                                file_type: String::from("photo"),
-                                unique_id: file_unique_id.into(),
-                                file_id: Some(file_id.into()),
+                                file_type: String::from("audio"),
+                                unique_id: file_unique_id,
+                                file_id: Some(file_id),
                             };
-                            handle_message(db.clone(), &acc, sdo, "media")
-                        })
+                            handle_message(db, &status, sdo, "media")
+                        } else {
+                            status
+                        }
+                    }
+                    MediaKind::Document(document) => {
+                        if !chat_config.allow_duplicate_media {
+                            let file_unique_id = document.document.file_unique_id;
+                            let file_id = document.document.file_id;
+                            log::info!("Document: {:?}", message);
+                            let caption =
+                                &*document.caption.unwrap_or_else(|| message.id.to_string());
+                            status.text = caption.into();
+                            let sdo = SDO {
+                                chat,
+                                msg_id,
+                                file_type: String::from("document"),
+                                unique_id: file_unique_id,
+                                file_id: Some(file_id),
+                            };
+                            handle_message(db, &status, sdo, "media")
+                        } else {
+                            status
+                        }
+                    }
+                    MediaKind::Photo(photo) => {
+                        if !chat_config.allow_duplicate_media {
+                            log::info!("Photo: {:?}", message);
+                            let caption = &*photo.caption.unwrap_or_else(|| message.id.to_string());
+                            status.text = caption.into();
+                            photo.photo.iter().fold(status, |acc, p| {
+                                let file_unique_id = &*p.file_unique_id;
+                                let file_id = &*p.file_id;
+                                let chat = chat.clone();
+                                let sdo = SDO {
+                                    chat,
+                                    msg_id,
+                                    file_type: String::from("photo"),
+                                    unique_id: file_unique_id.into(),
+                                    file_id: Some(file_id.into()),
+                                };
+                                handle_message(db.clone(), &acc, sdo, "media")
+                            })
+                        } else {
+                            status
+                        }
                     }
                     MediaKind::Video(video) => {
-                        let file_unique_id = video.video.file_unique_id;
-                        let file_id = video.video.file_id;
-                        let caption = &*video.caption.unwrap_or_else(|| message.id.to_string());
-                        log::info!("Video: {:?}", message);
-                        status.text = caption.into();
-                        let sdo = SDO {
-                            chat,
-                            msg_id,
-                            file_type: String::from("video"),
-                            unique_id: file_unique_id,
-                            file_id: Some(file_id),
-                        };
-                        handle_message(db, &status, sdo, "media")
+                        if !chat_config.allow_duplicate_media {
+                            let file_unique_id = video.video.file_unique_id;
+                            let file_id = video.video.file_id;
+                            let caption = &*video.caption.unwrap_or_else(|| message.id.to_string());
+                            log::info!("Video: {:?}", message);
+                            status.text = caption.into();
+                            let sdo = SDO {
+                                chat,
+                                msg_id,
+                                file_type: String::from("video"),
+                                unique_id: file_unique_id,
+                                file_id: Some(file_id),
+                            };
+                            handle_message(db, &status, sdo, "media")
+                        } else {
+                            status
+                        }
                     }
                     MediaKind::Voice(voice) => {
-                        let file_unique_id = voice.voice.file_unique_id;
-                        let file_id = voice.voice.file_id;
-                        log::info!("Voice: {:?}", message);
-                        let caption = &*voice.caption.unwrap_or_else(|| message.id.to_string());
-                        status.text = caption.into();
-                        let sdo = SDO {
-                            chat,
-                            msg_id,
-                            file_type: String::from("voice"),
-                            unique_id: file_unique_id,
-                            file_id: Some(file_id),
-                        };
-                        handle_message(db, &status, sdo, "media")
+                        if !chat_config.allow_duplicate_media {
+                            let file_unique_id = voice.voice.file_unique_id;
+                            let file_id = voice.voice.file_id;
+                            log::info!("Voice: {:?}", message);
+                            let caption = &*voice.caption.unwrap_or_else(|| message.id.to_string());
+                            status.text = caption.into();
+                            let sdo = SDO {
+                                chat,
+                                msg_id,
+                                file_type: String::from("voice"),
+                                unique_id: file_unique_id,
+                                file_id: Some(file_id),
+                            };
+                            handle_message(db, &status, sdo, "media")
+                        } else {
+                            status
+                        }
                     }
                     MediaKind::Venue(venue) => {
                         let target = venue;
