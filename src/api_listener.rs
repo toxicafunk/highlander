@@ -34,9 +34,7 @@ fn store_local(
         latitude,
         longitude,
         name,
-        address,
-        yays: 0,
-        nays: 0,
+        address
     };
     db.insert_local(local)
 }
@@ -253,6 +251,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                         });
 
                         let group = Group {
+                            name: chat.title().to_string(),
                             supergroup_id,
                             chat_id,
                             offset: 0,
@@ -280,11 +279,12 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                         let dbuser = match member.member_id() {
                                             MessageSender::User(sender_user) => {
                                                 log::info!("MessageSender:User: {:?}", sender_user);
+                                                //let group = db.get_group(g.chat_id.to_string());
                                                 Some(User {
                                                     user_id: sender_user.user_id(),
                                                     chat_id: g.chat_id,
                                                     user_name: String::default(),
-                                                    chat_name: String::default(),
+                                                    chat_name: g.name.clone(),
                                                     timestamp: Utc::now().timestamp(),
                                                 })
                                             }
@@ -315,6 +315,7 @@ pub async fn tgram_listener(tdlib: Arc<Tdlib>, db: RocksDBRepo) {
                                         });
 
                                         let group = Group {
+                                            name: g.name,
                                             supergroup_id: g.supergroup_id,
                                             chat_id: g.chat_id,
                                             offset: new_offset,

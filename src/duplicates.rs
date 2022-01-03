@@ -250,7 +250,7 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                         let (id, is_venue) = match &CHANNEL.write().unwrap().1.try_recv() {
                             Ok(chn_msg) => (chn_msg.id.clone(), chn_msg.is_venue),
                             Err(e) => {
-                                log::error!("Cannel failed: {}", e);
+                                log::error!("Channel failed: {}", e);
                                 (String::new(), false)
                             }
                         };
@@ -258,35 +258,43 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                         log::info!("is_venue: {}", is_venue);
 
                         if is_venue {
-                            let covidiano_btn = InlineKeyboardButton {
-                                text: String::from("Covidiana"),
+                            let pass_btn = InlineKeyboardButton {
+                                text: String::from("Pasaporte"),
                                 kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", id)),
                             };
-                            let despierto_btn = InlineKeyboardButton {
-                                text: String::from("Despierta"),
+                            let nopass_btn = InlineKeyboardButton {
+                                text: String::from("No Pasaporte"),
                                 kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", id)),
                             };
-                            let buttons = vec![covidiano_btn, despierto_btn];
+                            let awake_btn = InlineKeyboardButton {
+                                text: String::from("Despierto"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:2", id)),
+                            };
+                            let buttons = vec![pass_btn, nopass_btn, awake_btn];
                             let reply_mrkup = InlineKeyboardMarkup {
                                 inline_keyboard: vec![buttons],
                             };
                             let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
 
                             match db.get_local(id) {
-                                Some(local) => {
-                                    let txt = format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos. Tu que opinas?",
-                                     local.name, local.address, local.yays, local.nays);
+                                Some((local, vote)) => {
+                                    let txt = format!("{} en {} pide Paporte segun {} personas, no pide pasaporte segun {} y es un local Despierto segun {}. Tu que opinas?",
+                                                          local.name, local.address, vote.nopass, vote.pass, vote.awake);
                                     status.text = txt;
                                 }
                                 None => {
                                     status.text = String::from(
-                                        "Local NO ha sido reportado. Es esta ubicacion covidiana?",
+                                        "Local NO ha sido reportado. Piden pasaporte en esta ubicacion?",
                                     )
                                 }
                             }
                             status.reply_markup = Some(reply);
                         } else {
-                            log::info!("Looking locals at 1km near {}, {}", target.latitude, target.longitude);
+                            log::info!(
+                                "Looking locals at 1km near {}, {}",
+                                target.latitude,
+                                target.longitude
+                            );
                             let locals = db.find_nearby_by_coords(
                                 target.latitude,
                                 target.longitude,
@@ -295,8 +303,8 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                             if locals.len() > 0 {
                                 let res = locals
                                 .iter()
-                                .map(|local| format!("{} en {} es Covidiano segun {} votos y Despierto segun {} votos.",
-                                     local.name, local.address, local.yays, local.nays))
+                                .map(|(local, vote)| format!("{} en {} pide Paporte segun {} personas, no pide pasaporte segun {} y es un local Despierto segun {}.",
+                                     local.name, local.address, vote.pass, vote.nopass, vote.awake))
                                 .collect::<Vec<_>>();
                                 status.text = res.join("\n");
                             } else {

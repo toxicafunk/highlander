@@ -48,6 +48,8 @@ pub enum Command {
     ListMedia(u8),
     #[command(description = "find all users on multiple groups")]
     ListUsers(u8),
+    #[command(description = "list all groups")]
+    ListGroups(u8),
     #[command(description = "find all duplicates on multiple groups")]
     ListDuplicates(u8),
     #[command(description = "Get the Ids of all chats managed by highlander")]
@@ -298,6 +300,16 @@ pub fn handle_command(
                 HResponse::Text(response_too_long)
             }
 
+            Command::ListGroups(num) => {
+                let groups_vec = db.list_groups(num.into());
+                let vec = groups_vec
+                    .iter()
+                    .map(|group| format!("{:?}", group))
+                    .collect::<Vec<_>>();
+                log::info!("ListGroups: {}", vec.join("\n"));
+                HResponse::Text(response_too_long)
+            }
+
             Command::ListDuplicates(num) => {
                 let media_vec = db.list_duplicates(num.into());
                 let vec = media_vec
@@ -357,10 +369,10 @@ fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
                 let locals = db.find_local_by_name(name);
                 let res = locals
                     .iter()
-                    .map(|local| {
+                    .map(|(local, vote)| {
                         format!(
-                            "{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
-                            local.name, local.address, local.yays, local.nays
+                            "{} en {} pide pasaporte segun {} personas, no lo pide segun {} votos y es despierto segun {}",
+                            local.name, local.address, vote.pass, vote.nopass, vote.awake
                         )
                     })
                     .collect::<Vec<_>>();
@@ -370,10 +382,10 @@ fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
                 let locals = db.find_local_by_address(address);
                 let res = locals
                     .iter()
-                    .map(|local| {
+                    .map(|(local, vote)| {
                         format!(
-                            "{} en {} es Covidiano segun {} votos y Despierto segun {} votos",
-                            local.name, local.address, local.yays, local.nays
+                            "{} en {} pide pasaporte segun {} personas, no lo pide segun {} votos y es despierto segun {}",
+                            local.name, local.address, vote.pass, vote.nopass, vote.awake
                         )
                     })
                     .collect::<Vec<_>>();

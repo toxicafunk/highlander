@@ -4,7 +4,7 @@ use rtdlib::types::UpdateDeleteMessages;
 use teloxide::types::{Chat, User};
 
 use super::models::User as DBUser;
-use super::models::{Config, Local, Mapping, Media, SDO};
+use super::models::{Config, Group, Local, Mapping, Media, SDO, Vote};
 
 //Earth’s radius, sphere
 const EARTH_RADIUS_METERS: f64 = 6378137_f64;
@@ -50,17 +50,23 @@ pub trait Repository<T> {
     fn insert_dbuser(&self, user: DBUser) -> bool;
     fn list_media(&self, limit: usize) -> Vec<Media>;
     fn list_users(&self, limit: usize) -> Vec<DBUser>;
+    fn insert_group(&self, group: Group) -> bool;
+    fn get_group(&self, id: String) -> Option<Group>;
+    fn list_groups(&self, limit: usize) -> Vec<Group>;
     fn list_duplicates(&self, limit: usize) -> Vec<Media>;
     fn get_users_chat_count(&self, chat_id: i64, num_groups: usize) -> Vec<(DBUser, usize)>;
     fn inactive_users_before(&self, ndays: i64) -> Vec<DBUser>;
     fn update_config(&self, config: Config, chat: i64) -> bool;
     fn get_config(&self, chat: i64) -> Config;
+    fn insert_vote(&self, vote: Vote) -> bool;
+    fn get_vote(&self, vote_id: String) -> Option<Vote>;
+    fn find_votes_by_localid(&self, local_id: String) -> Vote;
     fn insert_local(&self, local: Local) -> bool;
-    fn get_local(&self, id: String) -> Option<Local>;
-    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<Local>;
-    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<Local>;
-    fn find_local_by_name(&self, name: String) -> Vec<Local>;
-    fn find_local_by_address(&self, address: String) -> Vec<Local>;
+    fn get_local(&self, local_id: String) -> Option<(Local, Vote)>;
+    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<(Local, Vote)>;
+    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<(Local, Vote)>;
+    fn find_local_by_name(&self, name: String) -> Vec<(Local, Vote)>;
+    fn find_local_by_address(&self, address: String) -> Vec<(Local, Vote)>;
 }
 
 #[cfg(test)]

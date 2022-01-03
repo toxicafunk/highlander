@@ -28,7 +28,7 @@ use rtdlib::Tdlib;
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
 use highlander::duplicates::{build_message, chat_id_for_link, detect_duplicates};
-use highlander::models::{HResponse, Local as HLocal, User as DBUser};
+use highlander::models::{HResponse, Local as HLocal, User as DBUser, Vote};
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
 
@@ -310,25 +310,32 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
 
     let parts: Vec<&str> = data.split(":").collect();
     let id = parts[0].to_string();
-    let vote: u16 = parts[1].parse().unwrap();
+    let current_vote: u16 = parts[1].parse().unwrap();
     let success = match DB.get_local(id.clone()) {
-        Some(local) => {
-            let current_yays = local.yays;
-            let current_nays = local.nays;
-            let yays = if vote == 1 {
-                current_yays + 1
+        Some((local, vote)) => {
+            let current_pass = vote.pass;
+            let current_nopass = vote.nopass;
+            let current_awake = vote.awake;
+            let pass = if current_vote == 1 {
+                current_pass + 1
             } else {
-                current_yays
+                current_pass
             };
-            let nays = if vote == 0 {
-                current_nays + 1
+            let nopass = if current_vote == 0 {
+                current_nopass + 1
             } else {
-                current_nays
+                current_nopass
             };
-            let updated_local = HLocal::new(id, &local, yays, nays);
-            DB.insert_local(updated_local)
-        }
-        None => false,
+            let awake = if current_vote == 2 {
+                current_awake + 1
+            } else {
+                current_awake
+            };
+            let updated_local = HLocal::new(id.clone(), &local);
+            let updated_vote = Vote { local_id: id, user_id: 0, pass, nopass, awake };
+            DB.insert_vote(updated_vote) && DB.insert_local(updated_local)
+        },
+        None => false
     };
 
     match cx

@@ -15,11 +15,15 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Config, Local, Mapping, Media, SDO};
+use super::models::{Config, Group, Local, Mapping, Media, SDO, Vote};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
-const DEFAULT_CONFIG: Config = Config { allow_forwards: true, block_non_latin: false, days_blocked: 5 };
+const DEFAULT_CONFIG: Config = Config {
+    allow_forwards: true,
+    block_non_latin: false,
+    days_blocked: 5,
+};
 
 #[allow(unused_variables)]
 fn media_ttl_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
@@ -121,7 +125,8 @@ impl Repository<Media> for RocksDBRepo {
         let configs_descriptor = ColumnFamilyDescriptor::new("configs", configs_opts);
         let locals_opts = Options::default();
         let locals_descriptor = ColumnFamilyDescriptor::new("locals", locals_opts);
-
+        let votes_opts = Options::default();
+        let votes_descriptor = ColumnFamilyDescriptor::new("votes", votes_opts);
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -135,7 +140,8 @@ impl Repository<Media> for RocksDBRepo {
             duplicates_descriptor,
             groups_descriptor,
             configs_descriptor,
-            locals_descriptor
+            locals_descriptor,
+            votes_descriptor
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -145,6 +151,25 @@ impl Repository<Media> for RocksDBRepo {
     }
 
     fn chat_user_exists(&self, user: &User, chat: Arc<Chat>) -> bool {
+        match self.get_group(chat.id.to_string()) {
+            Some(_) => (),
+            None => match chat.kind.clone() {
+                ChatKind::Public(chat_public) => {
+                    let name = chat_public
+                        .title
+                        .unwrap_or_else(|| chat.title().unwrap().to_string());
+                    let group = Group {
+                        name: name.clone(),
+                        supergroup_id: 0_i64,
+                        chat_id: chat.id,
+                        offset: 0,
+                        timestamp: Utc::now().timestamp(),
+                    };
+                    log::info!("Inserted group: {}, {}", name, self.insert_group(group));
+                }
+                ChatKind::Private(_) => (),
+            },
+        }
         self.chat_dbuser_exists(user.id, chat.id)
     }
 
@@ -221,11 +246,15 @@ impl Repository<Media> for RocksDBRepo {
                 Err(e) => {
                     log::error!("Config for {} failed to deserialize: {}", chat_id, e);
                     DEFAULT_CONFIG
-                },
-                Ok(config) => config
+                }
+                Ok(config) => config,
             },
             Ok(None) => {
-                log::warn!("Config for {} not found, using default config {:?}", chat_id, DEFAULT_CONFIG);
+                log::warn!(
+                    "Config for {} not found, using default config {:?}",
+                    chat_id,
+                    DEFAULT_CONFIG
+                );
                 DEFAULT_CONFIG
             }
             Err(e) => {
@@ -550,6 +579,65 @@ impl Repository<Media> for RocksDBRepo {
         users_vec
     }
 
+    fn insert_group(&self, group: Group) -> bool {
+        let groups_handle = self.db.cf_handle("groups").unwrap();
+        match bincode::serialize(&group) {
+            Err(e) => {
+                log::error!("insert_group: {}", e);
+                false
+            }
+            Ok(group_ser) => {
+                let k = group.chat_id.to_string();
+                match self.db.put_cf(groups_handle, key(k.as_bytes()), group_ser) {
+                    Err(e) => {
+                        log::error!("insert_group: {}", e);
+                        false
+                    }
+                    Ok(_) => {
+                        log::info!("insert_group: {:?}", group);
+                        true
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_group(&self, id: String) -> Option<Group> {
+        let groups_handle = self.db.cf_handle("groups").unwrap();
+        match self.db.get_cf(groups_handle, id.clone()) {
+            Ok(Some(g_ser)) => match bincode::deserialize::<Group>(&g_ser) {
+                Ok(group) => Some(group),
+                Err(e) => {
+                    log::error!("Error deserializing group {}\n{}", id, e);
+                    None
+                }
+            },
+            Ok(_) => {
+                log::error!("Retrieved empty group {}", id);
+                None
+            }
+            Err(e) => {
+                log::error!("Error retrieving group {}\n{}", id, e);
+                None
+            }
+        }
+    }
+
+    fn list_groups(&self, limit: usize) -> Vec<Group> {
+        let groups_handle = self.db.cf_handle("groups").unwrap();
+        let groups_it = self.db.iterator_cf(groups_handle, IteratorMode::Start);
+        let mut groups_vec = groups_it
+            .map(|(_, v_ser)| {
+                let group: Group = bincode::deserialize(&v_ser).unwrap();
+                group
+            })
+            .collect::<Vec<_>>();
+        if limit > 0 {
+            groups_vec.truncate(limit);
+        }
+        groups_vec
+    }
+
     fn list_duplicates(&self, limit: usize) -> Vec<Media> {
         let media_handle = self.db.cf_handle("duplicates").unwrap();
         let media_it = self.db.iterator_cf(media_handle, IteratorMode::Start);
@@ -581,9 +669,7 @@ impl Repository<Media> for RocksDBRepo {
                 let is_in_chat = g.iter().any(|user| user.chat_id == chat_id);
                 (user, count, is_in_chat)
             })
-            .filter(|tup| {
-                tup.1 >= num_groups && tup.2
-            })
+            .filter(|tup| tup.1 >= num_groups && tup.2)
             .map(|tup| (tup.0, tup.1))
             .collect::<Vec<_>>();
         users_vec
@@ -605,6 +691,94 @@ impl Repository<Media> for RocksDBRepo {
         users_vec
     }
 
+    fn insert_vote(&self, vote: Vote) -> bool {
+        let votes_handle = self.db.cf_handle("votes").unwrap();
+        match bincode::serialize(&vote) {
+            Err(e) => {
+                log::error!("insert_vote: {}", e);
+                false
+            }
+            Ok(vote_ser) => {
+                let k = format!("{}_{}", vote.local_id, vote.user_id);
+                match self.db.put_cf(votes_handle, key(k.as_bytes()), vote_ser) {
+                    Err(e) => {
+                        log::error!("insert_vote: {}", e);
+                        false
+                    }
+                    Ok(_) => {
+                        log::info!("insert_vote: {}", k);
+                        true
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_vote(&self, vote_id: String) -> Option<Vote> {
+        let votes_handle = self.db.cf_handle("votes").unwrap();
+        match self.db.get_cf(votes_handle, vote_id.clone()) {
+            Ok(Some(v_ser)) => match bincode::deserialize::<Vote>(&v_ser) {
+                Ok(vote) => Some(vote),
+                Err(e) => {
+                    log::error!("Error deserializing vote {}\n{}", vote_id, e);
+                    None
+                }
+            },
+            Ok(_) => {
+                log::error!("Retrieved empty vote {}", vote_id);
+                None
+            }
+            Err(e) => {
+                log::error!("Error retrieving vote {}\n{}", vote_id, e);
+                None
+            }
+        }
+    }
+
+    fn find_votes_by_localid(&self, local_id: String) -> Vote {
+        let votes_handle = self.db.cf_handle("votes").unwrap();
+        let votes_it = self.db.iterator_cf(votes_handle, IteratorMode::Start);
+        let votes_agg = votes_it
+            .filter(|(k_ser, _)| {
+                let key = String::from_utf8(k_ser.to_vec()).unwrap();
+                let ids: Vec<&str> = key.split("_").collect();
+                log::info!("votes by local id: {} | {}", ids[0], ids[1]);
+                ids[0] == local_id.as_str()
+            })
+            .map(|(_, v_ser)| {
+                let vote: Vote = bincode::deserialize(&v_ser).unwrap();
+                (vote.pass, vote.nopass, vote.awake)
+            })
+            .fold((0_u16, 0_u16, 0_u16), |acc, c| {
+                (acc.0 + c.0, acc.1 + c.1, acc.2 + c.2)
+            });
+        Vote { local_id, user_id: 0, pass: votes_agg.0, nopass: votes_agg.1, awake: votes_agg.2 }
+    }
+
+    fn get_local(&self, local_id: String) -> Option<(Local, Vote)> {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
+        match self.db.get_cf(&locals_handle, local_id.clone()) {
+            Ok(Some(l_ser)) => match bincode::deserialize::<Local>(&l_ser) {
+                Ok(local) => {
+                    let vote = self.find_votes_by_localid(local_id);
+                    Some((local, vote))
+                },
+                Err(e) => {
+                    log::error!("Error deserializing local {}\n{}", local_id, e);
+                    None
+                }
+            },
+            Ok(_) => {
+                log::error!("Retrieved empty local {}", local_id);
+                None
+            }
+            Err(e) => {
+                log::error!("Error retrieving local {}\n{}", local_id, e);
+                None
+            }
+        }
+    }
+
     fn insert_local(&self, local: Local) -> bool {
         let locals_handle = self.db.cf_handle("locals").unwrap();
         match bincode::serialize(&local) {
@@ -612,9 +786,9 @@ impl Repository<Media> for RocksDBRepo {
                 log::error!("insert_local: {}", e);
                 false
             }
-            Ok(media_ser) => {
+            Ok(local_ser) => {
                 let k = local.id;
-                match self.db.put_cf(locals_handle, key(k.as_bytes()), media_ser) {
+                match self.db.put_cf(locals_handle, key(k.as_bytes()), local_ser) {
                     Err(e) => {
                         log::error!("insert_local: {}", e);
                         false
@@ -626,58 +800,55 @@ impl Repository<Media> for RocksDBRepo {
                 }
             }
         }
-
     }
 
-    fn get_local(&self, id: String) -> Option<Local> {
-        let locals_handle = self.db.cf_handle("locals").unwrap();
-        match self.db.get_cf(&locals_handle, id.clone()) {
-            Ok(Some(l_ser)) => {
-                match bincode::deserialize::<Local>(&l_ser) {
-                    Ok(local) => Some(local),
-                    Err(e) => {
-                        log::error!("Error deserializing local {}\n{}", id, e);
-                        None
-                    }
-                }
-            },
-            Ok(_) => {
-                log::error!("Retrieved empty local {}", id);
-                None
-            }
-            Err(e) => {
-                log::error!("Error retrieving local {}\n{}", id, e);
-                None
-            }
-
-        }
-    }
-
-    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<Local> {
+    fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<(Local, Vote)> {
         self.find_nearby_by_coords(latitude, longitude, 1_f64)
     }
 
-    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<Local> {
+    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<(Local, Vote)> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
-        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+        self.db
+            .iterator_cf(locals_handle, IteratorMode::Start)
             .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
-            .filter(|local| is_within_meters(local.latitude, local.longitude, latitude, longitude, offset))
+            .filter(|local| {
+                is_within_meters(local.latitude, local.longitude, latitude, longitude, offset)
+            })
+            .map(|local| {
+                let vote = self.find_votes_by_localid(local.id.clone());
+                (local, vote)
+            })
             .collect::<Vec<_>>()
     }
 
-    fn find_local_by_name(&self, name: String) -> Vec<Local> {
+    fn find_local_by_name(&self, name: String) -> Vec<(Local, Vote)> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
-        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+        self.db
+            .iterator_cf(locals_handle, IteratorMode::Start)
             .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
             .filter(|local| local.name.to_lowercase().contains(&name.to_lowercase()))
+            .map(|local| {
+                let vote = self.find_votes_by_localid(local.id.clone());
+                (local, vote)
+            })
             .collect::<Vec<_>>()
     }
 
-    fn find_local_by_address(&self, address: String) -> Vec<Local> {
+    fn find_local_by_address(&self, address: String) -> Vec<(Local, Vote)> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
-        self.db.iterator_cf(locals_handle, IteratorMode::Start)
+        self.db
+            .iterator_cf(locals_handle, IteratorMode::Start)
             .map(|(_, v_ser)| bincode::deserialize::<Local>(&v_ser).unwrap())
-            .filter(|local| local.address.to_lowercase().contains(&address.to_lowercase()))
+            .filter(|local| {
+                local
+                    .address
+                    .to_lowercase()
+                    .contains(&address.to_lowercase())
+            })
+            .map(|local| {
+                let vote = self.find_votes_by_localid(local.id.clone());
+                (local, vote)
+            })
             .collect::<Vec<_>>()
     }
 }

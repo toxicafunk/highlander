@@ -69,6 +69,7 @@ pub enum ColFam {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Group {
+    pub name: String,
     pub supergroup_id: i64,
     pub chat_id: i64,
     pub offset: i64,
@@ -97,22 +98,27 @@ pub struct Local {
     pub longitude: f64,
     pub name: String,
     pub address: String,
-    pub yays: u16,
-    pub nays: u16
 }
 
 impl Local {
-    pub fn new(id: String, local: &Local, yay: u16, nay: u16) -> Self {
+    pub fn new(id: String, local: &Local) -> Self {
         Self {
             id,
             latitude: local.latitude,
             longitude: local.longitude,
             name: local.name.clone(),
-            address: local.address.clone(),
-            yays: local.yays + yay,
-            nays: local.nays + nay
+            address: local.address.clone()
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Vote {
+    pub local_id: String,
+    pub user_id: i64,
+    pub pass: u16,
+    pub nopass: u16,
+    pub awake: u16
 }
 
 pub enum HResponse {
