@@ -23,6 +23,8 @@ const DEFAULT_CONFIG: Config = Config {
     allow_forwards: true,
     block_non_latin: false,
     days_blocked: 5,
+    allow_duplicate_media: false,
+    allow_duplicate_links: false
 };
 
 #[allow(unused_variables)]

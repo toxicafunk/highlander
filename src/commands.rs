@@ -59,7 +59,7 @@ pub enum Command {
     #[command(
         description = "Sets whether the current group allows any forwards, blocks non-latin characters in names and the number of days to store 'duplicated' messages"
     )]
-    SetConfig(bool, bool, i64),
+    SetConfig(bool, bool, i64, bool, bool),
     #[command(description = "Retrieves config for the current group")]
     ShowConfig,
     #[command(description = "find locals by its name")]
@@ -342,11 +342,13 @@ pub fn handle_command(
                     HResponse::Text(msg)
                 }
             }
-            Command::SetConfig(allow_forwards, block_non_latin, days_blocked) => {
+            Command::SetConfig(allow_forwards, block_non_latin, days_blocked, allow_duplicate_media, allow_duplicate_links) => {
                 let config = Config {
                     allow_forwards,
                     block_non_latin,
                     days_blocked,
+                    allow_duplicate_media,
+                    allow_duplicate_links
                 };
                 let success = db.update_config(config, chat_id);
                 HResponse::Text(format!("Config updated: {}", success))

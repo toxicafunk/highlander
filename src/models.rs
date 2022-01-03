@@ -80,7 +80,9 @@ pub struct Group {
 pub struct Config {
     pub allow_forwards: bool,
     pub block_non_latin: bool,
-    pub days_blocked: i64
+    pub days_blocked: i64,
+    pub allow_duplicate_media: bool,
+    pub allow_duplicate_links: bool
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

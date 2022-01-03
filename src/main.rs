@@ -112,11 +112,11 @@ fn init_tgram() -> () {
     }
 }
 
-async fn notify_staff(chat_id: i64, msg_id: i32) {
+async fn notify_staff(chat_id: i64, chat_name: &str, msg_id: i32) {
     let chat_id_link = chat_id_for_link(chat_id);
     let link = format!(
-        "Se requiere intervencion de un `admin`: https://t.me/c/{}/{}",
-        chat_id_link, msg_id
+        "Se requiere intervencion de un `admin` en '{}': https://t.me/c/{}/{}",
+        chat_name, chat_id_link, msg_id
     );
     let send_message = build_message(link, -1001193436037);
     match send_message.to_json() {
@@ -229,7 +229,8 @@ async fn run() {
                             Some(txt) => {
                                 if let Some(_) = txt.find("@admin") {
                                     log::info!("Notificando a admin");
-                                    notify_staff(message.chat_id(), message.id).await;
+                                    let chat_name = message.chat.title().unwrap_or_else(|| message.chat.first_name().unwrap());
+                                    notify_staff(message.chat_id(), chat_name, message.id).await;
                                 }
                                 match Command::parse(txt, bot_name) {
                                 Ok(command) => {
