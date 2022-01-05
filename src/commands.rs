@@ -66,6 +66,8 @@ pub enum Command {
     FindLocalsByName(String),
     #[command(description = "find locals by its address")]
     FindLocalsByAddress(String),
+    #[command(description = "delete locals by its id")]
+    DeleteLocal(String),
 }
 
 fn prepare_input_media(ftype: &str, file_id: Option<&str>, unique_id: Option<&str>) -> InputMedia {
@@ -393,6 +395,10 @@ fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
                     .collect::<Vec<_>>();
                 HResponse::Text(res.join("\n"))
             }
+        Command::DeleteLocal(local_id) => {
+            let res = db.delete_local(local_id.clone());
+            HResponse::Text(format!("Local {} deleted: {}", local_id, res))
+        }
             _ => HResponse::Forbidden("Lamentablemente, este comando es solo para usuarios Admin".to_string()),
         }
 }

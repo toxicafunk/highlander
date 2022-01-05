@@ -60,9 +60,12 @@ pub trait Repository<T> {
     fn get_config(&self, chat: i64) -> Config;
     fn insert_vote(&self, vote: Vote) -> bool;
     fn get_vote(&self, vote_id: String) -> Option<Vote>;
+    fn delete_vote(&self, vote_id: String) -> bool;
+    fn delete_local_votes(&self, local_id: String) -> bool;
     fn find_votes_by_localid(&self, local_id: String) -> Vote;
     fn insert_local(&self, local: Local) -> bool;
     fn get_local(&self, local_id: String) -> Option<(Local, Vote)>;
+    fn delete_local(&self, local_id: String) -> bool;
     fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<(Local, Vote)>;
     fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<(Local, Vote)>;
     fn find_local_by_name(&self, name: String) -> Vec<(Local, Vote)>;

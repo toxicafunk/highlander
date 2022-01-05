@@ -15,7 +15,7 @@ use rocksdb::{
 use itertools::Itertools;
 
 use super::models::User as DBUser;
-use super::models::{Config, Group, Local, Mapping, Media, SDO, Vote};
+use super::models::{Config, Group, Local, Mapping, Media, Vote, SDO};
 use super::repository::*;
 
 const FOUR_DAYS_SECS: i64 = 345600;
@@ -24,7 +24,7 @@ const DEFAULT_CONFIG: Config = Config {
     block_non_latin: false,
     days_blocked: 5,
     allow_duplicate_media: false,
-    allow_duplicate_links: false
+    allow_duplicate_links: false,
 };
 
 #[allow(unused_variables)]
@@ -143,7 +143,7 @@ impl Repository<Media> for RocksDBRepo {
             groups_descriptor,
             configs_descriptor,
             locals_descriptor,
-            votes_descriptor
+            votes_descriptor,
         ];
 
         match DB::open_cf_descriptors(&opts, &format!("{}/.rocksdb", db_path), cfs) {
@@ -737,6 +737,32 @@ impl Repository<Media> for RocksDBRepo {
         }
     }
 
+    fn delete_vote(&self, vote_id: String) -> bool {
+        match self.db.delete(&vote_id) {
+            Ok(_) => true,
+            Err(e) => {
+                log::error!("Error deleting vote {}\n{}", vote_id, e);
+                false
+            }
+        }
+    }
+
+    fn delete_local_votes(&self, local_id: String) -> bool {
+        let votes_handle = self.db.cf_handle("votes").unwrap();
+        let votes_it = self.db.iterator_cf(votes_handle, IteratorMode::Start);
+        votes_it
+            .filter(|(k_ser, _)| {
+                let key = String::from_utf8(k_ser.to_vec()).unwrap();
+                let ids: Vec<&str> = key.split("_").collect();
+                log::info!("votes by local id: {} | {}", ids[0], ids[1]);
+                ids[0] == local_id.as_str()
+            })
+            .fold(true, |acc, tup| {
+                let key = String::from_utf8(tup.0.to_vec()).unwrap();
+                acc && self.delete_vote(key)
+            })
+    }
+
     fn find_votes_by_localid(&self, local_id: String) -> Vote {
         let votes_handle = self.db.cf_handle("votes").unwrap();
         let votes_it = self.db.iterator_cf(votes_handle, IteratorMode::Start);
@@ -754,7 +780,13 @@ impl Repository<Media> for RocksDBRepo {
             .fold((0_u16, 0_u16, 0_u16), |acc, c| {
                 (acc.0 + c.0, acc.1 + c.1, acc.2 + c.2)
             });
-        Vote { local_id, user_id: 0, pass: votes_agg.0, nopass: votes_agg.1, awake: votes_agg.2 }
+        Vote {
+            local_id,
+            user_id: 0,
+            pass: votes_agg.0,
+            nopass: votes_agg.1,
+            awake: votes_agg.2,
+        }
     }
 
     fn get_local(&self, local_id: String) -> Option<(Local, Vote)> {
@@ -764,7 +796,7 @@ impl Repository<Media> for RocksDBRepo {
                 Ok(local) => {
                     let vote = self.find_votes_by_localid(local_id);
                     Some((local, vote))
-                },
+                }
                 Err(e) => {
                     log::error!("Error deserializing local {}\n{}", local_id, e);
                     None
@@ -804,11 +836,30 @@ impl Repository<Media> for RocksDBRepo {
         }
     }
 
+    fn delete_local(&self, local_id: String) -> bool {
+        if self.delete_local_votes(local_id.clone()) {
+            match self.db.delete(&local_id) {
+                Ok(_) => true,
+                Err(e) => {
+                    log::error!("Error deleting vote {}\n{}", local_id, e);
+                    false
+                }
+            }
+        } else {
+            log::error!("Failed to delete votes for local {}", local_id);
+            false
+        }
+    }
     fn find_local_by_coords(&self, latitude: f64, longitude: f64) -> Vec<(Local, Vote)> {
         self.find_nearby_by_coords(latitude, longitude, 1_f64)
     }
 
-    fn find_nearby_by_coords(&self, latitude: f64, longitude: f64, offset: f64) -> Vec<(Local, Vote)> {
+    fn find_nearby_by_coords(
+        &self,
+        latitude: f64,
+        longitude: f64,
+        offset: f64,
+    ) -> Vec<(Local, Vote)> {
         let locals_handle = self.db.cf_handle("locals").unwrap();
         self.db
             .iterator_cf(locals_handle, IteratorMode::Start)
