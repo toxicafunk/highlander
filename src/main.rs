@@ -1,7 +1,7 @@
 #[macro_use]
 mod macros;
 
-use teloxide::prelude::*;
+use teloxide::{prelude::*, types::ParseMode};
 use teloxide::types::{ChatMemberStatus, True};
 use teloxide::utils::command::BotCommand;
 use teloxide::RequestError;
@@ -115,7 +115,7 @@ fn init_tgram() -> () {
 async fn notify_staff(chat_id: i64, chat_name: &str, msg_id: i32) {
     let chat_id_link = chat_id_for_link(chat_id);
     let link = format!(
-        "Se requiere intervencion de un `admin` en '{}': https://t.me/c/{}/{}",
+        "Se requiere intervencion de un \\`admin\\` en \\`{}\\`: https://t.me/c/{}/{}",
         chat_name, chat_id_link, msg_id
     );
     let send_message = build_message(link, -1001193436037);
@@ -181,14 +181,15 @@ async fn run() {
                 match message.from() {
                     Some(user) => {
                         // Handle normal messages
-                        let is_admin = match cx.requester.get_chat_member(message.chat.id, user.id).await {
-                            Ok(member) => match member.status() {
-                                ChatMemberStatus::Administrator => true,
-                                ChatMemberStatus::Owner => true,
-                                _ => false,
-                            },
-                            Err(_) => false
-                        };
+                        let is_admin =
+                            match cx.requester.get_chat_member(message.chat.id, user.id).await {
+                                Ok(member) => match member.status() {
+                                    ChatMemberStatus::Administrator => true,
+                                    ChatMemberStatus::Owner => true,
+                                    _ => false,
+                                },
+                                Err(_) => false,
+                            };
 
                         let status = detect_duplicates(DB.clone(), &message, user).await;
                         if is_test_mode || !is_admin {
@@ -198,7 +199,7 @@ async fn run() {
                                     Ok(m) => {
                                         log::info!("Deleted message: {:?}", m);
                                         true
-                                    },
+                                    }
                                     Err(e) => {
                                         log::error!("Error: {:?}", e);
                                         false
@@ -211,7 +212,9 @@ async fn run() {
                             if status.respond && success {
                                 let mr = match status.reply_markup {
                                     None => cx.answer(status.text).await,
-                                    Some(mrkup) => cx.answer(status.text).reply_markup(mrkup).send().await
+                                    Some(mrkup) => {
+                                        cx.answer(status.text).reply_markup(mrkup).send().await
+                                    }
                                 };
                                 match mr {
                                     Ok(m) => log::info!("Responded: {:?}", m),
@@ -229,12 +232,21 @@ async fn run() {
                             Some(txt) => {
                                 if let Some(_) = txt.find("@admin") {
                                     log::info!("Notificando a admin");
-                                    let chat_name = message.chat.title().unwrap_or_else(|| message.chat.first_name().unwrap());
+                                    let chat_name = message
+                                        .chat
+                                        .title()
+                                        .unwrap_or_else(|| message.chat.first_name().unwrap());
                                     notify_staff(message.chat_id(), chat_name, message.id).await;
                                 }
                                 match Command::parse(txt, bot_name) {
-                                Ok(command) => {
-                                        let cr = handle_command(DB.clone(), TDLIB.clone(), command, message.chat_id(), is_admin);
+                                    Ok(command) => {
+                                        let cr = handle_command(
+                                            DB.clone(),
+                                            TDLIB.clone(),
+                                            command,
+                                            message.chat_id(),
+                                            is_admin,
+                                        );
                                         match cr {
                                             Ok(hr) => match hr {
                                                 HResponse::URL(urls) => {
@@ -254,19 +266,22 @@ async fn run() {
                                                 HResponse::Media(vec) => {
                                                     match cx.answer_media_group(vec).await {
                                                         Ok(_) => (),
-                                                        Err(e) => log::error!("Error: {:?}", e)
+                                                        Err(e) => log::error!("Error: {:?}", e),
                                                     }
                                                 }
                                                 HResponse::Text(msg) => {
                                                     match cx.answer(msg).await {
                                                         Ok(_) => (),
-                                                        Err(e) => log::error!("Error: {:?}", e)
+                                                        Err(e) => log::error!("Error: {:?}", e),
                                                     }
                                                 }
                                                 HResponse::Ban(users) => {
-                                                    let b = users.iter()
-                                                                 .map(|user| ban_user(&cx, message.chat_id(), user))
-                                                                 .collect::<Vec<_>>();
+                                                    let b = users
+                                                        .iter()
+                                                        .map(|user| {
+                                                            ban_user(&cx, message.chat_id(), user)
+                                                        })
+                                                        .collect::<Vec<_>>();
                                                     log::info!("Banned {} users", b.len())
                                                 }
                                                 HResponse::Forbidden(txt) => {
@@ -274,13 +289,13 @@ async fn run() {
                                                     log::info!("Forbidden: {}", txt)
                                                 }
                                             },
-                                            Err(e) => log::error!("Error: {:?}", e)
+                                            Err(e) => log::error!("Error: {:?}", e),
                                         }
+                                    }
+                                    Err(_) => (),
                                 }
-                                Err(_) => ()
                             }
-                        },
-                            None => ()
+                            None => (),
                         }
                     }
                     None => (),
@@ -310,39 +325,66 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
     };
 
     let parts: Vec<&str> = data.split(":").collect();
-    let id = parts[0].to_string();
-    let current_vote: u16 = parts[1].parse().unwrap();
-    let success = match DB.get_local(id.clone()) {
-        Some((local, vote)) => {
-            let current_pass = vote.pass;
-            let current_nopass = vote.nopass;
-            let current_awake = vote.awake;
-            let pass = if current_vote == 1 {
-                current_pass + 1
-            } else {
-                current_pass
-            };
-            let nopass = if current_vote == 0 {
-                current_nopass + 1
-            } else {
-                current_nopass
-            };
-            let awake = if current_vote == 2 {
-                current_awake + 1
-            } else {
-                current_awake
-            };
-            let updated_local = HLocal::new(id.clone(), &local);
-            let updated_vote = Vote { local_id: id, user_id: 0, pass, nopass, awake };
-            DB.insert_vote(updated_vote) && DB.insert_local(updated_local)
-        },
-        None => false
+    let is_vote = if parts[0] == "v" { true } else { false };
+    let id = parts[1].to_string();
+    let current_selection: u16 = parts[2].parse().unwrap();
+    let (txt, notif) = if is_vote {
+        let contabilizado = String::from("Voto contabilizado");
+        match DB.get_local(id.clone()) {
+            Some((local, vote)) => {
+                let current_pass = vote.pass;
+                let current_nopass = vote.nopass;
+                let current_awake = vote.awake;
+                let pass = if current_selection == 1 {
+                    current_pass + 1
+                } else {
+                    current_pass
+                };
+                let nopass = if current_selection == 0 {
+                    current_nopass + 1
+                } else {
+                    current_nopass
+                };
+                let awake = if current_selection == 2 {
+                    current_awake + 1
+                } else {
+                    current_awake
+                };
+                let updated_local = HLocal::new(id.clone(), &local);
+                let updated_vote = Vote {
+                    local_id: id,
+                    user_id: 0,
+                    pass,
+                    nopass,
+                    awake,
+                };
+                (format!("{}: {}", contabilizado, DB.insert_vote(updated_vote) && DB.insert_local(updated_local)), contabilizado)
+            }
+            None => (String::from("Error al votar"), String::from("Voto NO contabilizado")),
+        }
+    } else {
+        let coords: Vec<&str> = parts[3].split("_").collect();
+        log::info!("Looking locals at 1km near {}, {}", coords[0], coords[1]);
+        let locals = DB.find_nearby_by_coords(coords[0].parse::<f64>().unwrap(), coords[1].parse::<f64>().unwrap() , current_selection as f64 * 1000_f64);
+        if locals.len() > 0 {
+            let res = locals
+                                .iter()
+                                .map(|(local, vote)| format!("- <b>{}</b> en {} pide Paporte segun {} personas, NO pide pasaporte segun {} y es un local Despierto segun {}",
+                                     local.name, local.address, vote.pass, vote.nopass, vote.awake))
+                                .collect::<Vec<_>>();
+            (res.join("\n"), format!("Se encontraron {} resultados", locals.len()))
+        } else {
+            (format!(
+                "No se han encontrado locales reportados en un radio de {}km",
+                current_selection
+            ), String::from("Sin resultados"))
+        }
     };
 
     match cx
         .requester
         .answer_callback_query(query_id)
-        .text(format!("Voto contabilizado: {}", success))
+        .text(notif)
         .send()
         .await
     {
@@ -352,7 +394,8 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
 
     match cx
         .requester
-        .edit_message_text(user_id, message_id, format!("Voto contabilizado!"))
+        .edit_message_text(user_id, message_id, txt)
+        .parse_mode(ParseMode::Html)
         .send()
         .await
     {

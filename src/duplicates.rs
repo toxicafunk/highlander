@@ -287,15 +287,15 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                         if is_venue {
                             let pass_btn = InlineKeyboardButton {
                                 text: String::from("Pasaporte"),
-                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:1", id)),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("v:{}:1", id)),
                             };
                             let nopass_btn = InlineKeyboardButton {
                                 text: String::from("No Pasaporte"),
-                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:0", id)),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("v:{}:0", id)),
                             };
                             let awake_btn = InlineKeyboardButton {
                                 text: String::from("Despierto"),
-                                kind: InlineKeyboardButtonKind::CallbackData(format!("{}:2", id)),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("v:{}:2", id)),
                             };
                             let buttons = vec![pass_btn, nopass_btn, awake_btn];
                             let reply_mrkup = InlineKeyboardMarkup {
@@ -317,28 +317,26 @@ pub async fn detect_duplicates(db: RocksDBRepo, message: &Message, user: &User) 
                             }
                             status.reply_markup = Some(reply);
                         } else {
-                            log::info!(
-                                "Looking locals at 1km near {}, {}",
-                                target.latitude,
-                                target.longitude
-                            );
-                            let locals = db.find_nearby_by_coords(
-                                target.latitude,
-                                target.longitude,
-                                1000_f64,
-                            );
-                            if locals.len() > 0 {
-                                let res = locals
-                                .iter()
-                                .map(|(local, vote)| format!("{} en {} pide Paporte segun {} personas, no pide pasaporte segun {} y es un local Despierto segun {}.",
-                                     local.name, local.address, vote.pass, vote.nopass, vote.awake))
-                                .collect::<Vec<_>>();
-                                status.text = res.join("\n");
-                            } else {
-                                status.text = String::from(
-                                    "No se han encontrado locales reportados en un radio de 1km",
-                                );
-                            }
+                            let one_btn = InlineKeyboardButton {
+                                text: String::from("1km"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("q:{}:1:{}_{}", id, target.latitude, target.longitude)),
+                            };
+                            let five_btn = InlineKeyboardButton {
+                                text: String::from("5km"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("q:{}:5:{}_{}", id, target.latitude, target.longitude)),
+                            };
+                            let ten_btn = InlineKeyboardButton {
+                                text: String::from("10km"),
+                                kind: InlineKeyboardButtonKind::CallbackData(format!("q:{}:10:{}_{}", id, target.latitude, target.longitude)),
+                            };
+                            let buttons = vec![one_btn, five_btn, ten_btn];
+                            let reply_mrkup = InlineKeyboardMarkup {
+                                inline_keyboard: vec![buttons],
+                            };
+                            let reply = ReplyMarkup::InlineKeyboard(reply_mrkup);
+
+                            status.text = String::from("Seleccione radio de busqueda:");
+                            status.reply_markup = Some(reply);
                         }
 
                         status.respond = true;
