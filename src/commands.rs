@@ -380,7 +380,12 @@ fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
                         )
                     })
                     .collect::<Vec<_>>();
-                HResponse::Text(res.join("\n"))
+
+                if res.len() > 0 {
+                    HResponse::Text(res.join("\n"))
+                } else {
+                    HResponse::Text(String::from("No se encontraron resultados!"))
+                }
             }
             Command::FindLocalsByAddress(address) => {
                 let locals = db.find_local_by_address(address);
@@ -393,7 +398,12 @@ fn process_non_admin_command(db: RocksDBRepo, command: Command) -> HResponse {
                         )
                     })
                     .collect::<Vec<_>>();
-                HResponse::Text(res.join("\n"))
+
+                if res.len() > 0 {
+                    HResponse::Text(res.join("\n"))
+                } else {
+                    HResponse::Text(String::from("No se encontraron resultados!"))
+                }
             }
         Command::DeleteLocal(local_id) => {
             let res = db.delete_local(local_id.clone());

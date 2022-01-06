@@ -738,7 +738,8 @@ impl Repository<Media> for RocksDBRepo {
     }
 
     fn delete_vote(&self, vote_id: String) -> bool {
-        match self.db.delete(&vote_id) {
+        let votes_handle = self.db.cf_handle("votes").unwrap();
+        match self.db.delete_cf(votes_handle, vote_id.as_bytes()) {
             Ok(_) => true,
             Err(e) => {
                 log::error!("Error deleting vote {}\n{}", vote_id, e);
@@ -837,8 +838,9 @@ impl Repository<Media> for RocksDBRepo {
     }
 
     fn delete_local(&self, local_id: String) -> bool {
+        let locals_handle = self.db.cf_handle("locals").unwrap();
         if self.delete_local_votes(local_id.clone()) {
-            match self.db.delete(&local_id) {
+            match self.db.delete_cf(locals_handle, &local_id.as_bytes()) {
                 Ok(_) => true,
                 Err(e) => {
                     log::error!("Error deleting vote {}\n{}", local_id, e);
