@@ -506,6 +506,21 @@ impl Repository<Media> for RocksDBRepo {
         users_vec
     }
 
+    fn list_user_groups_unpacked(&self, users: Vec<DBUser>) -> Vec<(i64, i64)> {
+        let chat_ids = self.list_groups(0);
+        let mut keys = Vec::new();
+        for c in chat_ids {
+            for u in &users {
+                keys.push(format!("{}_{}", c.chat_id, u.user_id))
+            }
+        }
+
+        self.list_users(0).iter()
+            .filter(|dbuser| keys.contains(&format!("{}_{}", dbuser.chat_id, dbuser.user_id)))
+            .map(|dbuser| (dbuser.chat_id, dbuser.user_id))
+            .collect::<Vec<_>>()
+    }
+
     fn get_chat_ids(&self) -> Vec<i64> {
         let users_handle = self.db.cf_handle("users").unwrap();
         let users_it = self.db.iterator_cf(users_handle, IteratorMode::Start);

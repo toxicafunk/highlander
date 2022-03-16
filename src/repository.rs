@@ -46,6 +46,7 @@ pub trait Repository<T> {
     fn last_media_stored(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
     fn last_media_duplicated(&self, chat_id: i64, limit: usize, is_url: bool) -> Vec<Media>;
     fn list_user_groups(&self, chat_id: i64, user_id: i64) -> Vec<DBUser>;
+    fn list_user_groups_unpacked(&self, user_ids: Vec<DBUser>) -> Vec<(i64, i64)>;
     fn get_chat_ids(&self) -> Vec<i64>;
     fn insert_dbuser(&self, user: DBUser) -> bool;
     fn list_media(&self, limit: usize) -> Vec<Media>;

@@ -1,10 +1,9 @@
 #[macro_use]
 mod macros;
 
-use teloxide::{prelude::*, types::ParseMode};
-use teloxide::types::{ChatMemberStatus, True};
+use teloxide::types::ChatMemberStatus;
 use teloxide::utils::command::BotCommand;
-use teloxide::RequestError;
+use teloxide::{prelude::*, types::ParseMode};
 
 use tokio::spawn;
 use tokio::time::{sleep, Duration};
@@ -12,6 +11,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 //use std::convert::Infallible;
 use std::env;
+//use std::fmt::Result;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use rtdlib::Tdlib;
 use highlander::api_listener::tgram_listener;
 use highlander::commands::*;
 use highlander::duplicates::{build_message, chat_id_for_link, detect_duplicates};
-use highlander::models::{HResponse, Local as HLocal, User as DBUser, Vote};
+use highlander::models::{HResponse, Local as HLocal, Vote};
 use highlander::repository::Repository;
 use highlander::rocksdb::RocksDBRepo;
 
@@ -276,13 +276,19 @@ async fn run() {
                                                     }
                                                 }
                                                 HResponse::Ban(users) => {
-                                                    let b = users
-                                                        .iter()
-                                                        .map(|user| {
-                                                            ban_user(&cx, message.chat_id(), user)
-                                                        })
-                                                        .collect::<Vec<_>>();
-                                                    log::info!("Banned {} users", b.len())
+                                                    for (chat_id, user_id) in DB.list_user_groups_unpacked(users) {
+                                                        match cx
+                                                            .requester
+                                                            .ban_chat_member(chat_id, user_id)
+                                                            .until_date(0)
+                                                            .await
+                                                        {
+                                                            Ok(_) => (),
+                                                            Err(e) => {
+                                                                log::error!("Failed to ban member {} from {}\n{}", user_id, chat_id, e);
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 HResponse::Forbidden(txt) => {
                                                     ok!(cx.answer(txt.clone()).await);
@@ -358,26 +364,46 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
                     nopass,
                     awake,
                 };
-                (format!("{}: {}", contabilizado, DB.insert_vote(updated_vote) && DB.insert_local(updated_local)), contabilizado)
+                (
+                    format!(
+                        "{}: {}",
+                        contabilizado,
+                        DB.insert_vote(updated_vote) && DB.insert_local(updated_local)
+                    ),
+                    contabilizado,
+                )
             }
-            None => (String::from("Error al votar"), String::from("Voto NO contabilizado")),
+            None => (
+                String::from("Error al votar"),
+                String::from("Voto NO contabilizado"),
+            ),
         }
     } else {
         let coords: Vec<&str> = parts[3].split("_").collect();
         log::info!("Looking locals at 1km near {}, {}", coords[0], coords[1]);
-        let locals = DB.find_nearby_by_coords(coords[0].parse::<f64>().unwrap(), coords[1].parse::<f64>().unwrap() , current_selection as f64 * 1000_f64);
+        let locals = DB.find_nearby_by_coords(
+            coords[0].parse::<f64>().unwrap(),
+            coords[1].parse::<f64>().unwrap(),
+            current_selection as f64 * 1000_f64,
+        );
         if locals.len() > 0 {
             let res = locals
                                 .iter()
                                 .map(|(local, vote)| format!("- <b>{}</b> en {} pide Paporte segun {} personas, NO pide pasaporte segun {} y es un local Despierto segun {}",
                                      local.name, local.address, vote.pass, vote.nopass, vote.awake))
                                 .collect::<Vec<_>>();
-            (res.join("\n"), format!("Se encontraron {} resultados", locals.len()))
+            (
+                res.join("\n"),
+                format!("Se encontraron {} resultados", locals.len()),
+            )
         } else {
-            (format!(
-                "No se han encontrado locales reportados en un radio de {}km",
-                current_selection
-            ), String::from("Sin resultados"))
+            (
+                format!(
+                    "No se han encontrado locales reportados en un radio de {}km",
+                    current_selection
+                ),
+                String::from("Sin resultados"),
+            )
         }
     };
 
@@ -402,13 +428,4 @@ async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
         Err(e) => log::error!("Error edit_message {}", e),
         _ => log::info!("Great!"),
     }
-}
-
-type Cx = UpdateWithCx<AutoSend<Bot>, Message>;
-
-async fn ban_user(cx: &Cx, chat_id: i64, user: &DBUser) -> Result<True, RequestError> {
-    cx.requester
-        .ban_chat_member(chat_id, user.user_id)
-        .until_date(0)
-        .await
 }

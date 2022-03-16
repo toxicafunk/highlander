@@ -44,6 +44,12 @@ pub struct Media {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BanDTO {
+    pub user_id: i64,
+    pub chat_id: i64
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct User {
     pub user_id: i64,
     pub chat_id: i64,
